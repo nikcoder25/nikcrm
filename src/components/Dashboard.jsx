@@ -3,7 +3,8 @@ import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardLi
 import * as api from "../lib/api";
 import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
-import { Center } from "./ui";
+import { useRouter, clientIdFromPath, clientPath } from "../lib/router";
+import { Center, Panel, Empty } from "./ui";
 import Overview from "./Overview";
 import Clients from "./Clients";
 import Board from "./Board";
@@ -30,10 +31,17 @@ export default function Dashboard({ session, onSignOut }) {
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [detailId, setDetailId] = useState(null); // client whose detail view is open
+
+  // The open client detail lives in the URL (/clients/:id) so it's linkable and
+  // survives a refresh, instead of being a modal driven by local state.
+  const { path, navigate } = useRouter();
+  const detailId = clientIdFromPath(path);
 
   const isAdmin = session.role === "admin";
-  const detailClient = detailId ? clients.find((c) => c.id === detailId) : null;
+  const detailClient = detailId ? clients.find((c) => String(c.id) === String(detailId)) : null;
+
+  const openClient = (c) => navigate(clientPath(c.id));
+  const backToClients = () => { setTab("clients"); navigate("/"); };
 
   // A 401 means our stored password is no longer valid (e.g. it was rotated).
   // Drop the stale session and bounce to the login screen instead of leaving
@@ -72,7 +80,7 @@ export default function Dashboard({ session, onSignOut }) {
     await api.saveClient(c.id ? c : { ...c, created_by: session.name });
     setShowForm(false); setEditing(null);
   });
-  const delClient = (id) => run(async () => { await api.deleteClient(id); setDetailId(null); });
+  const delClient = (id) => run(async () => { await api.deleteClient(id); backToClients(); });
   const addTask = (t) => run(() => api.addTask(t));
   const moveTask = (id, status) => run(() => api.moveTask(id, status));
   const delTask = (id) => run(() => api.deleteTask(id));
@@ -94,6 +102,13 @@ export default function Dashboard({ session, onSignOut }) {
     { k: "team", l: "Team", i: Users },
   ];
 
+  const errorBanner = error && (
+    <div style={{ background: tint, border: BD, borderRadius: 12, padding: "14px 18px", margin: "20px 28px 0", fontWeight: 600, fontSize: 13.5, color: ink }}>
+      {error}
+      <button onClick={load} style={{ ...btn("#fff", ink), marginLeft: 14, padding: "5px 12px", fontSize: 12 }}>Retry</button>
+    </div>
+  );
+
   return (
     <div className="shell" style={{ display: "flex", minHeight: "100vh", background: cream, color: ink, fontFamily: "'Inter',sans-serif" }}>
       <style>{globalCss}</style>
@@ -105,7 +120,7 @@ export default function Dashboard({ session, onSignOut }) {
         <nav className="nav" style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
           {NAV.map((n) => {
             const I = n.i, on = tab === n.k;
-            return <button key={n.k} className="ni" onClick={() => setTab(n.k)}
+            return <button key={n.k} className="ni" onClick={() => { setTab(n.k); if (detailId) navigate("/"); }}
               style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", borderRadius: 11, border: on ? BD : "3px solid transparent", background: on ? "#fff" : "transparent", color: on ? ink : "#c9bdf0", fontWeight: on ? 800 : 700, fontSize: 14.5, cursor: "pointer", textAlign: "left", boxShadow: on ? "4px 4px 0 rgba(0,0,0,.4)" : "none" }}>
               <I size={17} /> <span>{n.l}</span>
             </button>;
@@ -124,44 +139,55 @@ export default function Dashboard({ session, onSignOut }) {
       </aside>
 
       <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 28px", borderBottom: BD, flexWrap: "wrap", gap: 12 }}>
-          <div style={{ fontFamily: disp, fontSize: 26, textTransform: "uppercase", letterSpacing: "-0.02em" }}>{NAV.find((n) => n.k === tab)?.l}</div>
-          {tab === "clients" && <button style={btn(accent, "#fff")} onClick={() => { setEditing(null); setShowForm(true); }}><Plus size={16} /> Add client</button>}
-        </header>
+        {errorBanner}
+        {detailId ? (
+          <div style={{ padding: 28 }}>
+            {loading ? <Center>Loading client…</Center> :
+              detailClient ? (
+                <ClientDetail
+                  client={detailClient}
+                  resources={resources.filter((r) => r.client_id === detailClient.id)}
+                  keywords={keywords.filter((k) => k.client_id === detailClient.id)}
+                  keywordHistory={keywordHistory}
+                  deliverables={deliverables.filter((d) => d.client_id === detailClient.id)}
+                  reports={reports.filter((r) => r.client_id === detailClient.id)}
+                  isAdmin={isAdmin}
+                  onBack={backToClients}
+                  onEdit={(c) => { setEditing(c); setShowForm(true); }}
+                  onDeleteClient={delClient}
+                  onChanged={load}
+                />
+              ) : (
+                <Panel>
+                  <Empty>
+                    This client could not be found.
+                    <div style={{ marginTop: 16 }}>
+                      <button style={{ ...btn(accent, "#fff"), display: "inline-flex" }} onClick={backToClients}>Back to clients</button>
+                    </div>
+                  </Empty>
+                </Panel>
+              )}
+          </div>
+        ) : (
+          <>
+            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 28px", borderBottom: BD, flexWrap: "wrap", gap: 12 }}>
+              <div style={{ fontFamily: disp, fontSize: 26, textTransform: "uppercase", letterSpacing: "-0.02em" }}>{NAV.find((n) => n.k === tab)?.l}</div>
+              {tab === "clients" && <button style={btn(accent, "#fff")} onClick={() => { setEditing(null); setShowForm(true); }}><Plus size={16} /> Add client</button>}
+            </header>
 
-        <div style={{ padding: 28 }}>
-          {error && (
-            <div style={{ background: tint, border: BD, borderRadius: 12, padding: "14px 18px", marginBottom: 20, fontWeight: 600, fontSize: 13.5, color: ink }}>
-              {error}
-              <button onClick={load} style={{ ...btn("#fff", ink), marginLeft: 14, padding: "5px 12px", fontSize: 12 }}>Retry</button>
+            <div style={{ padding: 28 }}>
+              {loading ? <Center>Loading your board...</Center> :
+                tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} /> :
+                tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
+                tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
+                tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} /> :
+                tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} /> :
+                tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
+                <Team clients={clients} tasks={tasks} />}
             </div>
-          )}
-          {loading ? <Center>Loading your board...</Center> :
-            tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} /> :
-            tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={(c) => setDetailId(c.id)} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
-            tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
-            tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} /> :
-            tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} /> :
-            tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
-            <Team clients={clients} tasks={tasks} />}
-        </div>
+          </>
+        )}
       </main>
-
-      {detailClient && (
-        <ClientDetail
-          client={detailClient}
-          resources={resources.filter((r) => r.client_id === detailClient.id)}
-          keywords={keywords.filter((k) => k.client_id === detailClient.id)}
-          keywordHistory={keywordHistory}
-          deliverables={deliverables.filter((d) => d.client_id === detailClient.id)}
-          reports={reports.filter((r) => r.client_id === detailClient.id)}
-          isAdmin={isAdmin}
-          onClose={() => setDetailId(null)}
-          onEdit={(c) => { setEditing(c); setShowForm(true); }}
-          onDeleteClient={delClient}
-          onChanged={load}
-        />
-      )}
 
       {showForm && <ClientForm initial={editing} onClose={() => { setShowForm(false); setEditing(null); }} onSave={saveClient} />}
     </div>
