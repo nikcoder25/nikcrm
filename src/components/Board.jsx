@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Plus, X } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, SH, SHs, sel, btn, moveBtn } from "../lib/theme";
 import { TASK_TYPES, TASK_STATES, typeLabel } from "../lib/constants";
+import { isPastDue } from "../lib/format";
 
 /* ---------------- Task Board ---------------- */
 export default function Board({ clients, tasks, onAdd, onMove, onDelete }) {
@@ -49,7 +50,10 @@ export default function Board({ clients, tasks, onAdd, onMove, onDelete }) {
                   <div style={{ fontSize: 12, color: "#6b6580", fontWeight: 600 }}>{nameOf(t.client_id)}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
                     <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, padding: "3px 9px", borderRadius: 6, border: "2px solid " + ink }}>{t.assignee || "Unassigned"}</span>
-                    {t.due && <span style={{ fontSize: 11, color: "#6b6580", fontWeight: 700 }}>{t.due}</span>}
+                    {t.due && (() => {
+                      const overdue = isPastDue(t.due) && (t.status || "todo") !== "done";
+                      return <span style={{ fontSize: 11, color: overdue ? "#c0392b" : "#6b6580", fontWeight: overdue ? 800 : 700 }}>{overdue ? "⚠ " : ""}{t.due}</span>;
+                    })()}
                   </div>
                   <div style={{ display: "flex", gap: 7, marginTop: 12, borderTop: "2px solid #eee", paddingTop: 11 }}>
                     {idx > 0 && <button style={moveBtn(false)} onClick={() => onMove(t.id, TASK_STATES[idx - 1].key)}>‹ {TASK_STATES[idx - 1].label}</button>}

@@ -2,9 +2,11 @@ import React, { useState } from "react";
 import { Plus, Pencil, Trash2, X } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, SH, SHs, btn, iconBtn, sel, overlay, modal, lbl, input } from "../lib/theme";
 import { TASK_TYPES, typeLabel, DELIVERABLE_STATES } from "../lib/constants";
+import { isPastDue } from "../lib/format";
 import { Panel, Empty, Field, Pick, Row } from "./ui";
 
 const STATUS_BG = { planned: "#f0ece2", in_progress: tint, delivered: "#d7f5df", blocked: "#f7dede" };
+const isOverdue = (d) => isPastDue(d.due_date) && d.status !== "delivered";
 
 /* ---------------- Deliverables ---------------- */
 export default function Deliverables({ clients, deliverables, onCreate, onUpdate, onDelete }) {
@@ -51,8 +53,13 @@ export default function Deliverables({ clients, deliverables, onCreate, onUpdate
                     <div style={{ flex: 1, minWidth: 140 }}>
                       <div style={{ fontWeight: 800, fontSize: 14 }}>{d.title || typeLabel(d.type)}{Number(d.quantity) > 1 ? ` ×${d.quantity}` : ""}</div>
                       {(d.due_date || d.notes) && (
-                        <div style={{ fontSize: 12, color: "#6b6580", fontWeight: 600, marginTop: 2 }}>
-                          {d.due_date ? `Due ${d.due_date}` : ""}{d.due_date && d.notes ? " · " : ""}{d.notes || ""}
+                        <div style={{ fontSize: 12, fontWeight: 600, marginTop: 2, color: "#6b6580" }}>
+                          {d.due_date && (
+                            <span style={{ color: isOverdue(d) ? "#c0392b" : "#6b6580", fontWeight: isOverdue(d) ? 800 : 600 }}>
+                              Due {d.due_date}{isOverdue(d) ? " · Overdue" : ""}
+                            </span>
+                          )}
+                          {d.due_date && d.notes ? " · " : ""}{d.notes || ""}
                         </div>
                       )}
                     </div>
