@@ -76,6 +76,40 @@ Supabase > **Authentication > Providers > Email** > turn off "Confirm email" if 
 
 ---
 
+## Project structure
+```
+.
+├── index.html            App entry HTML
+├── package.json          Scripts + dependencies
+├── netlify.toml          Netlify build config (build: npm run build, publish: dist)
+├── vercel.json           Vercel build config
+├── vite.config.js        Vite + React setup
+├── .env.example          Template for your Supabase keys
+├── src/
+│   ├── main.jsx          React entry point
+│   ├── App.jsx           Top-level: routes between setup / login / dashboard
+│   ├── lib/              Non-UI modules
+│   │   ├── supabaseClient.js   Supabase connection + "configured?" check
+│   │   ├── constants.js        Statuses, sources, task types, pay states
+│   │   ├── format.js           money / month helpers
+│   │   └── theme.js            Colors, borders, shared inline-style tokens, global CSS
+│   └── components/       One file per screen / shared UI
+│       ├── SetupNeeded.jsx     Shown when Supabase keys are missing
+│       ├── Login.jsx           Login / signup
+│       ├── Dashboard.jsx       Shell, nav, data loading, tab routing
+│       ├── Clients.jsx         Clients list
+│       ├── Board.jsx           Kanban task board
+│       ├── Revenue.jsx         MRR, collected/pending, payment tracker
+│       ├── Team.jsx            Per-member workload
+│       ├── ClientForm.jsx      Add / edit client modal
+│       └── ui.jsx              Small shared pieces (Field, Pick, Panel, RevCard...)
+└── supabase/
+    ├── schema.sql        Tables + row-level security (run once)
+    └── seed-clients.sql  Optional: preload clients
+```
+
+---
+
 ## Notes
 - The old single-file tool (`seo-ops-system.jsx`) still works for solo use. This new app is the online, team version.
 - Deliverables and keyword-rank tracking tables already exist in the database (`deliverables`, `keywords`). The UI for those can be added next; the foundation is ready.
