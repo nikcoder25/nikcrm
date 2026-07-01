@@ -96,6 +96,15 @@ async function ensureSchema(sql) {
     notes text default '',
     created_at timestamptz default now()
   )`;
+  await sql`create table if not exists client_reports (
+    id uuid primary key default gen_random_uuid(),
+    client_id uuid references clients(id) on delete cascade,
+    period text not null,                    -- 'YYYY-MM'
+    summary text default '',                 -- the free-text wins narrative
+    created_at timestamptz default now(),
+    updated_at timestamptz default now(),
+    unique (client_id, period)
+  )`;
   schemaReady = true;
 }
 
@@ -191,7 +200,7 @@ export default async (req) => {
     await ensureSchema(sql);
     switch (action) {
       case "load": {
-        const [clients, tasks, payments, resources, deliverables, keywords] = await Promise.all([
+        const [clients, tasks, payments, resources, deliverables, keywords, client_reports] = await Promise.all([
           sql`select * from clients order by created_at desc`,
           sql`select * from tasks order by created_at desc`,
           sql`select * from payments`,
@@ -199,8 +208,9 @@ export default async (req) => {
               from resources order by created_at desc`,
           sql`select * from deliverables order by created_at desc`,
           sql`select * from keywords order by created_at desc`,
+          sql`select id, client_id, period, summary, updated_at from client_reports`,
         ]);
-        return json({ clients, tasks, payments, resources, deliverables, keywords });
+        return json({ clients, tasks, payments, resources, deliverables, keywords, client_reports });
       }
 
       case "clientSave": {
@@ -358,6 +368,23 @@ export default async (req) => {
       case "keywordDelete": {
         // Not admin-gated — only client deletion is.
         await sql`delete from keywords where id=${payload.id}`;
+        return json({ ok: true });
+      }
+
+      case "reportSave": {
+        // Upsert the monthly narrative for a client. Not admin-gated.
+        const r = payload;
+        if (!r.client_id || !r.period) return json({ error: "Missing client or month." }, 400);
+        await sql`insert into client_reports (client_id, period, summary)
+          values (${r.client_id}, ${r.period}, ${r.summary || ""})
+          on conflict (client_id, period) do update set
+            summary=excluded.summary, updated_at=now()`;
+        return json({ ok: true });
+      }
+
+      case "reportDelete": {
+        // Not admin-gated — only client deletion is.
+        await sql`delete from client_reports where id=${payload.id}`;
         return json({ ok: true });
       }
 

@@ -89,3 +89,16 @@ create table if not exists keywords (
   notes text default '',
   created_at timestamptz default now()
 );
+
+-- Client monthly reports: the free-text "wins" narrative, one per client per
+-- month. Rankings/deliverables in the report are assembled live from the tables
+-- above; only this narrative is stored.
+create table if not exists client_reports (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  period text not null,                    -- 'YYYY-MM'
+  summary text default '',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique (client_id, period)
+);

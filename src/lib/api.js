@@ -101,3 +101,7 @@ export const deleteDeliverable = (id) => call("deliverableDelete", { id });
 export const createKeyword = (k) => call("keywordCreate", k);
 export const updateKeyword = (k) => call("keywordUpdate", k);
 export const deleteKeyword = (id) => call("keywordDelete", { id });
+
+/* ---------------- monthly reports (per-client narrative) ---------------- */
+export const saveReport = (client_id, period, summary) => call("reportSave", { client_id, period, summary });
+export const deleteReport = (id) => call("reportDelete", { id });
