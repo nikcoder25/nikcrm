@@ -75,3 +75,17 @@ create table if not exists deliverables (
   notes text default '',
   created_at timestamptz default now()
 );
+
+-- Keywords: manual keyword-rank tracking per client. On each rank change the
+-- API rolls current_rank into previous_rank so movement stays meaningful.
+create table if not exists keywords (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  keyword text default '',
+  current_rank integer,                    -- lower is better; null = not ranked / untracked
+  previous_rank integer,
+  target_url text default '',
+  checked_at timestamptz,
+  notes text default '',
+  created_at timestamptz default now()
+);

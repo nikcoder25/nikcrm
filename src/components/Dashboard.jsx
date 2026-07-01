@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList } from "lucide-react";
+import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search } from "lucide-react";
 import * as api from "../lib/api";
 import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
@@ -7,6 +7,7 @@ import { Center } from "./ui";
 import Clients from "./Clients";
 import Board from "./Board";
 import Deliverables from "./Deliverables";
+import Keywords from "./Keywords";
 import Revenue from "./Revenue";
 import Team from "./Team";
 import ClientForm from "./ClientForm";
@@ -19,6 +20,7 @@ export default function Dashboard({ session, onSignOut }) {
   const [payments, setPayments] = useState([]);
   const [resources, setResources] = useState([]);
   const [deliverables, setDeliverables] = useState([]);
+  const [keywords, setKeywords] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
   const [tab, setTab] = useState("clients");
   const [loading, setLoading] = useState(true);
@@ -41,12 +43,13 @@ export default function Dashboard({ session, onSignOut }) {
   const load = async () => {
     setLoading(true); setError("");
     try {
-      const { clients, tasks, payments, resources, deliverables } = await api.load();
+      const { clients, tasks, payments, resources, deliverables, keywords } = await api.load();
       setClients(clients || []);
       setTasks(tasks || []);
       setPayments(payments || []);
       setResources(resources || []);
       setDeliverables(deliverables || []);
+      setKeywords(keywords || []);
     } catch (e) {
       handleErr(e, "Could not reach the database.");
     }
@@ -72,11 +75,15 @@ export default function Dashboard({ session, onSignOut }) {
   const createDeliverable = (d) => run(() => api.createDeliverable(d));
   const updateDeliverable = (d) => run(() => api.updateDeliverable(d));
   const delDeliverable = (id) => run(() => api.deleteDeliverable(id));
+  const createKeyword = (k) => run(() => api.createKeyword(k));
+  const updateKeyword = (k) => run(() => api.updateKeyword(k));
+  const delKeyword = (id) => run(() => api.deleteKeyword(id));
 
   const NAV = [
     { k: "clients", l: "Clients", i: FolderKanban },
     { k: "tasks", l: "Task Board", i: CheckSquare },
     { k: "deliverables", l: "Deliverables", i: ClipboardList },
+    { k: "keywords", l: "Keywords", i: Search },
     { k: "revenue", l: "Revenue", i: DollarSign },
     { k: "team", l: "Team", i: Users },
   ];
@@ -127,6 +134,7 @@ export default function Dashboard({ session, onSignOut }) {
             tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={(c) => setDetailId(c.id)} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
             tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
             tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} /> :
+            tab === "keywords" ? <Keywords clients={clients} keywords={keywords} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} /> :
             tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
             <Team clients={clients} tasks={tasks} />}
         </div>
@@ -136,6 +144,7 @@ export default function Dashboard({ session, onSignOut }) {
         <ClientDetail
           client={detailClient}
           resources={resources.filter((r) => r.client_id === detailClient.id)}
+          keywords={keywords.filter((k) => k.client_id === detailClient.id)}
           isAdmin={isAdmin}
           onClose={() => setDetailId(null)}
           onEdit={(c) => { setEditing(c); setShowForm(true); }}

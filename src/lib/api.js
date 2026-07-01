@@ -96,3 +96,8 @@ export async function fetchFileObjectUrl(blobKey) {
 export const createDeliverable = (d) => call("deliverableCreate", d);
 export const updateDeliverable = (d) => call("deliverableUpdate", d);
 export const deleteDeliverable = (id) => call("deliverableDelete", { id });
+
+/* ---------------- keywords (manual rank tracking) ---------------- */
+export const createKeyword = (k) => call("keywordCreate", k);
+export const updateKeyword = (k) => call("keywordUpdate", k);
+export const deleteKeyword = (id) => call("keywordDelete", { id });

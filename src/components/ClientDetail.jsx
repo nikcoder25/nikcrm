@@ -1,10 +1,14 @@
 import React, { useRef, useState } from "react";
-import { X, Pencil, Trash2, Paperclip, Link2, FileText, Upload, ExternalLink } from "lucide-react";
+import { X, Pencil, Trash2, Paperclip, Link2, FileText, Upload, ExternalLink, Search, Plus } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, SH, SHs, btn, iconBtn, overlay, input, lbl } from "../lib/theme";
 import { STATUS_LABEL } from "../lib/constants";
 import { money } from "../lib/format";
-import { addResourceLink, uploadResourceFile, deleteResource, fetchFileObjectUrl, MAX_FILE_BYTES } from "../lib/api";
+import {
+  addResourceLink, uploadResourceFile, deleteResource, fetchFileObjectUrl, MAX_FILE_BYTES,
+  createKeyword, updateKeyword, deleteKeyword,
+} from "../lib/api";
 import { Empty } from "./ui";
+import { KeywordRows, KeywordForm, keywordSummary } from "./Keywords";
 
 const fmtSize = (n) => {
   const b = Number(n) || 0;
@@ -27,11 +31,13 @@ function Detail({ label, value }) {
   );
 }
 
-export default function ClientDetail({ client, resources, isAdmin, onClose, onEdit, onDeleteClient, onChanged }) {
+export default function ClientDetail({ client, resources, keywords = [], isAdmin, onClose, onEdit, onDeleteClient, onChanged }) {
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [kwForm, setKwForm] = useState(false);
+  const [kwEditing, setKwEditing] = useState(null);
   const fileRef = useRef(null);
 
   const guard = async (fn) => {
@@ -65,7 +71,17 @@ export default function ClientDetail({ client, resources, isAdmin, onClose, onEd
 
   const removeResource = (id) => guard(async () => { await deleteResource(id); onChanged(); });
 
+  const saveKeyword = (k) => guard(async () => {
+    await (k.id ? updateKeyword(k) : createKeyword(k));
+    setKwForm(false); setKwEditing(null);
+    onChanged();
+  });
+  const removeKeyword = (id) => guard(async () => { await deleteKeyword(id); onChanged(); });
+
+  const kstats = keywordSummary(keywords);
+
   return (
+    <>
     <div style={overlay} onClick={onClose}>
       <div style={wideModal} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
@@ -148,10 +164,38 @@ export default function ClientDetail({ client, resources, isAdmin, onClose, onEd
           )}
         </div>
 
+        <div style={{ marginTop: 22 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>
+              <Search size={16} /> Keyword ranks
+            </div>
+            {keywords.length > 0 && (
+              <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>
+                avg {kstats.avg == null ? "—" : `#${kstats.avg}`} · {kstats.top10} in top 10
+              </span>
+            )}
+            <button style={btn(accent, "#fff")} disabled={busy} onClick={() => { setKwEditing(null); setKwForm(true); }}><Plus size={15} /> Add keyword</button>
+          </div>
+          <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
+            <KeywordRows keywords={keywords} onEdit={(k) => { setKwEditing(k); setKwForm(true); }} onDelete={removeKeyword} />
+          </div>
+        </div>
+
         <button style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 22, justifyContent: "center" }} onClick={() => onEdit(client)}>
           <Pencil size={15} /> Edit client details
         </button>
       </div>
     </div>
+
+    {kwForm && (
+      <KeywordForm
+        clients={[client]}
+        initial={kwEditing}
+        preClient={client.id}
+        onClose={() => { setKwForm(false); setKwEditing(null); }}
+        onSave={saveKeyword}
+      />
+    )}
+    </>
   );
 }
