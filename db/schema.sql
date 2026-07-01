@@ -62,3 +62,16 @@ create table if not exists resources (
   created_by text default '',
   created_at timestamptz default now()
 );
+
+-- Deliverables: what we owe each client and its progress.
+create table if not exists deliverables (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  title text default '',
+  type text default 'other',              -- reuses task types (guest / onpage / ...)
+  status text default 'planned',          -- planned / in_progress / delivered / blocked
+  quantity integer default 1,
+  due_date date,
+  notes text default '',
+  created_at timestamptz default now()
+);

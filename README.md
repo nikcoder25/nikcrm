@@ -13,6 +13,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Clients**: add, edit, delete — status, source, package, team, dates, notes, monthly fee
 - **Client detail view**: click any client to see everything in one place, plus a **Resources** panel — attach links (Google Drive, Canva, Sheets…) *and* upload job files (stored in Netlify Blobs, up to 4 MB each)
 - **Task Board** (kanban): Guest Post, On-Page, Backlink, Anchor Text, Blog, Audit, Schema. Assign people, move To Do → In Progress → Done
+- **Deliverables**: track what you owe each client — type, quantity, due date, and status (Planned / In Progress / Delivered / Blocked), grouped by client with a per-client delivered/total summary
 - **Revenue**: MRR, collected vs pending per month, revenue by source, and a per-client payment tracker (Pending / Paid / Overdue)
 - **Team** view: who has how many clients and tasks
 
@@ -89,9 +90,11 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
         ├── Dashboard.jsx       Shell, nav, data loading, tab routing
         ├── Clients.jsx         Clients list
         ├── Board.jsx           Kanban task board
+        ├── Deliverables.jsx    Per-client deliverables + add/edit form
         ├── Revenue.jsx         MRR, collected/pending, payment tracker
         ├── Team.jsx            Per-member workload
         ├── ClientForm.jsx      Add / edit client modal
+        ├── ClientDetail.jsx    Client detail view + resources (links & files)
         └── ui.jsx              Small shared pieces (Field, Pick, Panel, RevCard...)
 ```
 
@@ -100,5 +103,5 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
 ## Notes
 - **Security model.** This is a lightweight internal tool: access is gated by a shared password that the browser sends with each API request, and the database is only reachable through the Netlify Function — never directly from the browser. Set strong passwords and share them carefully. For per-person accounts you'd add a real auth provider later.
 - **Uploaded files** are stored in **Netlify Blobs**, which is enabled automatically for any site with functions — no setup. Downloads are also password-gated (served through the function, never a public URL). Limit is 4 MB per file; for bigger assets, attach a link instead.
-- Deliverables and keyword-rank tracking can be added next; the data layer is ready to extend.
+- Keyword-rank tracking can be added next; the data layer is ready to extend.
 - Set each client's monthly fee in the client form — the Revenue tab rolls up from there.

@@ -91,3 +91,8 @@ export async function fetchFileObjectUrl(blobKey) {
   }
   return URL.createObjectURL(await res.blob());
 }
+
+/* ---------------- deliverables ---------------- */
+export const createDeliverable = (d) => call("deliverableCreate", d);
+export const updateDeliverable = (d) => call("deliverableUpdate", d);
+export const deleteDeliverable = (id) => call("deliverableDelete", { id });

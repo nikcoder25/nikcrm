@@ -74,6 +74,17 @@ async function ensureSchema(sql) {
     created_by text default '',
     created_at timestamptz default now()
   )`;
+  await sql`create table if not exists deliverables (
+    id uuid primary key default gen_random_uuid(),
+    client_id uuid references clients(id) on delete cascade,
+    title text default '',
+    type text default 'other',              -- reuses task types (guest / onpage / ...)
+    status text default 'planned',          -- planned / in_progress / delivered / blocked
+    quantity integer default 1,
+    due_date date,
+    notes text default '',
+    created_at timestamptz default now()
+  )`;
   schemaReady = true;
 }
 
@@ -162,14 +173,15 @@ export default async (req) => {
     await ensureSchema(sql);
     switch (action) {
       case "load": {
-        const [clients, tasks, payments, resources] = await Promise.all([
+        const [clients, tasks, payments, resources, deliverables] = await Promise.all([
           sql`select * from clients order by created_at desc`,
           sql`select * from tasks order by created_at desc`,
           sql`select * from payments`,
           sql`select id, client_id, kind, label, url, blob_key, filename, content_type, size, created_by, created_at
               from resources order by created_at desc`,
+          sql`select * from deliverables order by created_at desc`,
         ]);
-        return json({ clients, tasks, payments, resources });
+        return json({ clients, tasks, payments, resources, deliverables });
       }
 
       case "clientSave": {
@@ -267,6 +279,31 @@ export default async (req) => {
           try { await getStore(FILES_STORE).delete(rows[0].blob_key); } catch { /* best effort */ }
         }
         await sql`delete from resources where id=${payload.id}`;
+        return json({ ok: true });
+      }
+
+      case "deliverableCreate": {
+        const d = payload;
+        if (!d.client_id) return json({ error: "Pick a client for the deliverable." }, 400);
+        await sql`insert into deliverables (client_id, title, type, status, quantity, due_date, notes)
+          values (${d.client_id}, ${d.title || ""}, ${d.type || "other"}, ${d.status || "planned"},
+                  ${Number(d.quantity) || 1}, ${d.due_date || null}, ${d.notes || ""})`;
+        return json({ ok: true });
+      }
+
+      case "deliverableUpdate": {
+        const d = payload;
+        if (!d.id) return json({ error: "Missing deliverable id." }, 400);
+        await sql`update deliverables set
+          title=${d.title || ""}, type=${d.type || "other"}, status=${d.status || "planned"},
+          quantity=${Number(d.quantity) || 1}, due_date=${d.due_date || null}, notes=${d.notes || ""}
+          where id=${d.id}`;
+        return json({ ok: true });
+      }
+
+      case "deliverableDelete": {
+        // Not admin-gated — only client deletion is.
+        await sql`delete from deliverables where id=${payload.id}`;
         return json({ ok: true });
       }
 

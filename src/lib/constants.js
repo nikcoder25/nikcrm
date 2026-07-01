@@ -14,3 +14,12 @@ export const typeLabel = (k) => (TASK_TYPES.find((t) => t.key === k) || TASK_TYP
 
 export const TASK_STATES = [{ key: "todo", label: "To Do" }, { key: "doing", label: "In Progress" }, { key: "done", label: "Done" }];
 export const PAY_STATES = [{ key: "pending", label: "Pending" }, { key: "paid", label: "Paid" }, { key: "overdue", label: "Overdue" }];
+
+// Deliverables reuse TASK_TYPES for their "type"; these are their workflow states.
+export const DELIVERABLE_STATES = [
+  { key: "planned", label: "Planned" },
+  { key: "in_progress", label: "In Progress" },
+  { key: "delivered", label: "Delivered" },
+  { key: "blocked", label: "Blocked" },
+];
+export const deliverableStatusLabel = (k) => (DELIVERABLE_STATES.find((s) => s.key === k) || DELIVERABLE_STATES[0]).label;
