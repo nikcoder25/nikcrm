@@ -8,6 +8,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 ---
 
 ## What you get
+- **Overview**: a home dashboard with rollup KPIs (clients, open tasks, deliverables delivered/overdue, MRR + collected, avg keyword rank) and a **"Needs attention"** list of everything overdue
 - **Team login** with one shared password (set an optional second password for admins)
 - **Roles**: admins can delete clients; everyone else can do everything else
 - **Clients**: add, edit, delete — status, source, package, team, dates, notes, monthly fee
@@ -90,6 +91,7 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
     └── components/         One file per screen / shared UI
         ├── Login.jsx           Name + team password
         ├── Dashboard.jsx       Shell, nav, data loading, tab routing
+        ├── Overview.jsx        Home dashboard: KPI rollups + overdue list
         ├── Clients.jsx         Clients list
         ├── Board.jsx           Kanban task board
         ├── Deliverables.jsx    Per-client deliverables + add/edit form

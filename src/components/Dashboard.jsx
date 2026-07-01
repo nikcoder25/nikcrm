@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search } from "lucide-react";
+import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard } from "lucide-react";
 import * as api from "../lib/api";
 import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
 import { Center } from "./ui";
+import Overview from "./Overview";
 import Clients from "./Clients";
 import Board from "./Board";
 import Deliverables from "./Deliverables";
@@ -23,7 +24,7 @@ export default function Dashboard({ session, onSignOut }) {
   const [keywords, setKeywords] = useState([]);
   const [reports, setReports] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
-  const [tab, setTab] = useState("clients");
+  const [tab, setTab] = useState("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -82,6 +83,7 @@ export default function Dashboard({ session, onSignOut }) {
   const delKeyword = (id) => run(() => api.deleteKeyword(id));
 
   const NAV = [
+    { k: "overview", l: "Overview", i: LayoutDashboard },
     { k: "clients", l: "Clients", i: FolderKanban },
     { k: "tasks", l: "Task Board", i: CheckSquare },
     { k: "deliverables", l: "Deliverables", i: ClipboardList },
@@ -133,6 +135,7 @@ export default function Dashboard({ session, onSignOut }) {
             </div>
           )}
           {loading ? <Center>Loading your board...</Center> :
+            tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} /> :
             tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={(c) => setDetailId(c.id)} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
             tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
             tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} /> :
