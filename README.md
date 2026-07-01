@@ -25,7 +25,8 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 
 ### 2. Add a database (Netlify DB / Neon)
 - On the site: **Project configuration → Netlify DB** (or the **Extensions** tab → Netlify DB) → **enable / provision** it.
-- This creates a free Neon Postgres database and sets `NETLIFY_DATABASE_URL` for you automatically. You do **not** copy any connection string by hand.
+- This creates a free Neon Postgres database. Provisioning usually sets the required **`NETLIFY_DATABASE_URL`** environment variable for you.
+- **If data loads fail** with `Database not configured. Set NETLIFY_DATABASE_URL.` (HTTP 503), the variable didn't reach the function. Set it manually: **Project configuration → Environment variables → Add a variable → `NETLIFY_DATABASE_URL`**, paste the connection string from the **Neon dashboard** (Netlify DB → open in Neon → connection string), scope it to **Builds + Functions + Runtime**, then redeploy. Never paste this value into the repo.
 - The tables are created automatically the first time the app talks to the database — there is no SQL step. (Reference schema lives in `db/schema.sql` if you ever want it.)
 
 ### 3. Set your team passwords
