@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { Plus, Pencil, Trash2, X, ArrowUp, ArrowDown, Minus, ExternalLink, Search, Target } from "lucide-react";
-import { accent, tint, disp, BD, BDt, btn, iconBtn, overlay, modal, lbl, input } from "../lib/theme";
+import { Plus, Pencil, Trash2, X, ArrowUp, ArrowDown, Minus, ExternalLink, Search, Target, Download } from "lucide-react";
+import { ink, accent, tint, disp, BD, BDt, btn, iconBtn, overlay, modal, lbl, input } from "../lib/theme";
+import { downloadCsv, keywordsCsv } from "../lib/csv";
 import { Panel, Empty, Field, Row, RevCard } from "./ui";
 
 // Movement vs the previous recorded rank. Lower rank number is better, so a
@@ -125,7 +126,8 @@ export default function Keywords({ clients, keywords, onCreate, onUpdate, onDele
         <RevCard icon={ArrowUp} label="In top 10" val={String(s.top10)} hint="rank 1–10" />
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 16 }}>
+        <button style={btn("#fff", ink)} disabled={keywords.length === 0} onClick={() => downloadCsv("keywords.csv", keywordsCsv(keywords, clients))}><Download size={15} /> Export CSV</button>
         <button style={btn(accent, "#fff")} disabled={clients.length === 0} onClick={() => openAdd()}><Plus size={16} /> Add keyword</button>
       </div>
 

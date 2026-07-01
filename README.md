@@ -111,3 +111,4 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
 - **Uploaded files** are stored in **Netlify Blobs**, which is enabled automatically for any site with functions — no setup. Downloads are also password-gated (served through the function, never a public URL). Limit is 4 MB per file; for bigger assets, attach a link instead.
 - **Keyword ranks are entered manually** (no third-party rank API). When you change a keyword's rank, the old value automatically rolls into "previous" so the up/down movement stays meaningful.
 - Set each client's monthly fee in the client form — the Revenue tab rolls up from there.
+- **Export to CSV**: each list (Clients, Deliverables, Keywords, Payments) has an "Export CSV" button that downloads the data — opens straight in Excel / Google Sheets. Runs entirely in the browser on already-loaded data.

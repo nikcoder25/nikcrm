@@ -1,13 +1,20 @@
 import React from "react";
-import { Pencil, Trash2, ChevronRight } from "lucide-react";
-import { ink, accent, tint, iconBtn } from "../lib/theme";
+import { Pencil, Trash2, ChevronRight, Download } from "lucide-react";
+import { ink, accent, tint, btn, iconBtn } from "../lib/theme";
 import { STATUS_LABEL } from "../lib/constants";
+import { downloadCsv, clientsCsv } from "../lib/csv";
 import { Panel, Empty } from "./ui";
 
 /* ---------------- Clients ---------------- */
 export default function Clients({ clients, deliverables = [], isAdmin, onOpen, onEdit, onDelete }) {
-  if (clients.length === 0) return <Panel><Empty>No clients yet. Tap "Add client".</Empty></Panel>;
   return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+        <button style={btn("#fff", ink)} disabled={clients.length === 0} onClick={() => downloadCsv("clients.csv", clientsCsv(clients))}>
+          <Download size={15} /> Export CSV
+        </button>
+      </div>
+      {clients.length === 0 ? <Panel><Empty>No clients yet. Tap "Add client".</Empty></Panel> : (
     <Panel>
       {clients.map((c) => {
         const dels = deliverables.filter((d) => d.client_id === c.id);
@@ -42,5 +49,7 @@ export default function Clients({ clients, deliverables = [], isAdmin, onOpen, o
         );
       })}
     </Panel>
+      )}
+    </div>
   );
 }

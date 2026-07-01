@@ -1,8 +1,9 @@
 import React from "react";
-import { DollarSign, Wallet, Check } from "lucide-react";
-import { ink, accent, disp, BD, BDt, SH, sel } from "../lib/theme";
+import { DollarSign, Wallet, Check, Download } from "lucide-react";
+import { ink, accent, disp, BD, BDt, SH, sel, btn } from "../lib/theme";
 import { PAY_STATES } from "../lib/constants";
 import { money, ym, ymLabel } from "../lib/format";
+import { downloadCsv, paymentsCsv } from "../lib/csv";
 import { Panel, Empty, RevCard } from "./ui";
 
 /* ---------------- Revenue ---------------- */
@@ -31,7 +32,10 @@ export default function Revenue({ clients, payments, month, setMonth, onSet }) {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 16 }}>
+        <button style={btn("#fff", ink)} disabled={payments.length === 0} onClick={() => downloadCsv("payments.csv", paymentsCsv(payments, clients))}>
+          <Download size={15} /> Export CSV
+        </button>
         <select style={{ ...sel, flex: "none", minWidth: 150 }} value={month} onChange={(e) => setMonth(e.target.value)}>
           {months.map((m) => <option key={m} value={m}>{ymLabel(m)}</option>)}
         </select>
