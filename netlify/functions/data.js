@@ -1,4 +1,10 @@
 import { neon } from "@netlify/neon";
+import { getStore } from "@netlify/blobs";
+
+// Uploaded client files live in a Netlify Blobs store (auto-available to
+// functions — no setup). The DB "resources" table holds the metadata + blob key.
+const FILES_STORE = "client-files";
+const MAX_FILE_BYTES = 4 * 1024 * 1024; // 4 MB — keeps the base64 body under the function limit
 
 // Netlify DB (Neon) connection, created lazily. neon() reads NETLIFY_DATABASE_URL
 // (set when you provision Netlify DB, or added manually on the site). We only
@@ -55,6 +61,19 @@ async function ensureSchema(sql) {
     created_at timestamptz default now(),
     unique (client_id, month)
   )`;
+  await sql`create table if not exists resources (
+    id uuid primary key default gen_random_uuid(),
+    client_id uuid references clients(id) on delete cascade,
+    kind text default 'link',               -- 'link' | 'file'
+    label text default '',
+    url text default '',                     -- external URL for links
+    blob_key text default '',                -- Netlify Blobs key for uploaded files
+    filename text default '',
+    content_type text default '',
+    size integer default 0,
+    created_by text default '',
+    created_at timestamptz default now()
+  )`;
   schemaReady = true;
 }
 
@@ -82,6 +101,34 @@ function resolveRole(pw) {
 const NOT_CONFIGURED = "Login isn't set up yet. Set APP_PASSWORD in Netlify.";
 
 export default async (req) => {
+  // GET is used only to download an uploaded file (streamed as its real bytes,
+  // not JSON). Still password-gated, like every other request.
+  if (req.method === "GET") {
+    if (!authConfigured()) return json({ error: NOT_CONFIGURED }, 503);
+    if (!resolveRole(req.headers.get("x-app-password") || "")) return json({ error: "Unauthorized" }, 401);
+    if (!process.env.NETLIFY_DATABASE_URL) return json({ error: "Database not configured. Set NETLIFY_DATABASE_URL." }, 503);
+    const key = new URL(req.url).searchParams.get("key") || "";
+    if (!key) return json({ error: "Missing file key" }, 400);
+    try {
+      const sql = db();
+      await ensureSchema(sql);
+      const rows = await sql`select filename, content_type from resources where blob_key=${key} and kind='file' limit 1`;
+      if (!rows.length) return json({ error: "File not found" }, 404);
+      const data = await getStore(FILES_STORE).get(key, { type: "arrayBuffer" });
+      if (!data) return json({ error: "File no longer stored" }, 404);
+      const safeName = (rows[0].filename || "file").replace(/["\\\r\n]/g, "");
+      return new Response(data, {
+        status: 200,
+        headers: {
+          "content-type": rows[0].content_type || "application/octet-stream",
+          "content-disposition": `inline; filename="${safeName}"`,
+        },
+      });
+    } catch (e) {
+      return json({ error: String(e?.message || e) }, 500);
+    }
+  }
+
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   let body;
@@ -115,12 +162,14 @@ export default async (req) => {
     await ensureSchema(sql);
     switch (action) {
       case "load": {
-        const [clients, tasks, payments] = await Promise.all([
+        const [clients, tasks, payments, resources] = await Promise.all([
           sql`select * from clients order by created_at desc`,
           sql`select * from tasks order by created_at desc`,
           sql`select * from payments`,
+          sql`select id, client_id, kind, label, url, blob_key, filename, content_type, size, created_by, created_at
+              from resources order by created_at desc`,
         ]);
-        return json({ clients, tasks, payments });
+        return json({ clients, tasks, payments, resources });
       }
 
       case "clientSave": {
@@ -146,6 +195,13 @@ export default async (req) => {
 
       case "clientDelete": {
         if (!isAdmin) return json({ error: "Only an admin can delete clients." }, 403);
+        // Remove the client's uploaded blobs first (DB rows cascade, blobs don't).
+        const files = await sql`select blob_key from resources
+          where client_id=${payload.id} and kind='file' and blob_key <> ''`;
+        if (files.length) {
+          const store = getStore(FILES_STORE);
+          for (const f of files) { try { await store.delete(f.blob_key); } catch { /* best effort */ } }
+        }
         await sql`delete from clients where id=${payload.id}`;
         return json({ ok: true });
       }
@@ -175,6 +231,42 @@ export default async (req) => {
           values (${p.client_id}, ${p.month}, ${Number(p.amount) || 0}, ${p.status}, ${paidDate})
           on conflict (client_id, month) do update set
             amount=excluded.amount, status=excluded.status, paid_date=excluded.paid_date`;
+        return json({ ok: true });
+      }
+
+      case "resourceLinkAdd": {
+        const r = payload;
+        if (!r.client_id) return json({ error: "Missing client." }, 400);
+        if (!r.url || !r.url.trim()) return json({ error: "A link URL is required." }, 400);
+        await sql`insert into resources (client_id, kind, label, url, created_by)
+          values (${r.client_id}, 'link', ${r.label || ""}, ${r.url.trim()}, ${r.created_by || ""})`;
+        return json({ ok: true });
+      }
+
+      case "resourceFileAdd": {
+        const r = payload;
+        if (!r.client_id) return json({ error: "Missing client." }, 400);
+        const b64 = r.dataBase64 || "";
+        if (!b64) return json({ error: "No file data." }, 400);
+        const buffer = Buffer.from(b64, "base64");
+        if (!buffer.length) return json({ error: "Empty file." }, 400);
+        if (buffer.length > MAX_FILE_BYTES) return json({ error: "File too large (max 4 MB)." }, 413);
+        const key = crypto.randomUUID();
+        await getStore(FILES_STORE).set(key, buffer);
+        await sql`insert into resources
+          (client_id, kind, label, blob_key, filename, content_type, size, created_by)
+          values (${r.client_id}, 'file', ${r.label || r.filename || "File"}, ${key},
+                  ${r.filename || "file"}, ${r.content_type || "application/octet-stream"},
+                  ${buffer.length}, ${r.created_by || ""})`;
+        return json({ ok: true });
+      }
+
+      case "resourceDelete": {
+        const rows = await sql`select kind, blob_key from resources where id=${payload.id} limit 1`;
+        if (rows.length && rows[0].kind === "file" && rows[0].blob_key) {
+          try { await getStore(FILES_STORE).delete(rows[0].blob_key); } catch { /* best effort */ }
+        }
+        await sql`delete from resources where id=${payload.id}`;
         return json({ ok: true });
       }
 

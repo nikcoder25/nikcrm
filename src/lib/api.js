@@ -48,3 +48,46 @@ export const addTask = (t) => call("taskAdd", t);
 export const moveTask = (id, status) => call("taskMove", { id, status });
 export const deleteTask = (id) => call("taskDelete", { id });
 export const setPayment = (client_id, month, patch) => call("paymentSet", { client_id, month, ...patch });
+
+/* ---------------- resources (links + uploaded files) ---------------- */
+export const MAX_FILE_BYTES = 4 * 1024 * 1024;
+
+export const addResourceLink = (client_id, label, url) => call("resourceLinkAdd", { client_id, label, url });
+export const deleteResource = (id) => call("resourceDelete", { id });
+
+const readAsBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the file."));
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || ""); // strip data: prefix
+    reader.readAsDataURL(file);
+  });
+
+export async function uploadResourceFile(client_id, file, label) {
+  if (file.size > MAX_FILE_BYTES) throw new Error("File too large (max 4 MB).");
+  const dataBase64 = await readAsBase64(file);
+  return call("resourceFileAdd", {
+    client_id,
+    label: label || file.name,
+    filename: file.name,
+    content_type: file.type || "application/octet-stream",
+    size: file.size,
+    dataBase64,
+  });
+}
+
+// Download an uploaded file: fetch it with the auth header, then hand back a
+// temporary object URL the browser can open or save.
+export async function fetchFileObjectUrl(blobKey) {
+  const s = getSession();
+  const res = await fetch(`/api/data?key=${encodeURIComponent(blobKey)}`, {
+    headers: { ...(s?.password ? { "x-app-password": s.password } : {}) },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const err = new Error(data.error || `Download failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return URL.createObjectURL(await res.blob());
+}

@@ -9,20 +9,24 @@ import Board from "./Board";
 import Revenue from "./Revenue";
 import Team from "./Team";
 import ClientForm from "./ClientForm";
+import ClientDetail from "./ClientDetail";
 
 /* ---------------- Dashboard ---------------- */
 export default function Dashboard({ session, onSignOut }) {
   const [clients, setClients] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [resources, setResources] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
   const [tab, setTab] = useState("clients");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [detailId, setDetailId] = useState(null); // client whose detail view is open
 
   const isAdmin = session.role === "admin";
+  const detailClient = detailId ? clients.find((c) => c.id === detailId) : null;
 
   // A 401 means our stored password is no longer valid (e.g. it was rotated).
   // Drop the stale session and bounce to the login screen instead of leaving
@@ -35,10 +39,11 @@ export default function Dashboard({ session, onSignOut }) {
   const load = async () => {
     setLoading(true); setError("");
     try {
-      const { clients, tasks, payments } = await api.load();
+      const { clients, tasks, payments, resources } = await api.load();
       setClients(clients || []);
       setTasks(tasks || []);
       setPayments(payments || []);
+      setResources(resources || []);
     } catch (e) {
       handleErr(e, "Could not reach the database.");
     }
@@ -56,7 +61,7 @@ export default function Dashboard({ session, onSignOut }) {
     await api.saveClient(c.id ? c : { ...c, created_by: session.name });
     setShowForm(false); setEditing(null);
   });
-  const delClient = (id) => run(() => api.deleteClient(id));
+  const delClient = (id) => run(async () => { await api.deleteClient(id); setDetailId(null); });
   const addTask = (t) => run(() => api.addTask(t));
   const moveTask = (id, status) => run(() => api.moveTask(id, status));
   const delTask = (id) => run(() => api.deleteTask(id));
@@ -112,12 +117,24 @@ export default function Dashboard({ session, onSignOut }) {
             </div>
           )}
           {loading ? <Center>Loading your board...</Center> :
-            tab === "clients" ? <Clients clients={clients} isAdmin={isAdmin} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
+            tab === "clients" ? <Clients clients={clients} isAdmin={isAdmin} onOpen={(c) => setDetailId(c.id)} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
             tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
             tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
             <Team clients={clients} tasks={tasks} />}
         </div>
       </main>
+
+      {detailClient && (
+        <ClientDetail
+          client={detailClient}
+          resources={resources.filter((r) => r.client_id === detailClient.id)}
+          isAdmin={isAdmin}
+          onClose={() => setDetailId(null)}
+          onEdit={(c) => { setEditing(c); setShowForm(true); }}
+          onDeleteClient={delClient}
+          onChanged={load}
+        />
+      )}
 
       {showForm && <ClientForm initial={editing} onClose={() => { setShowForm(false); setEditing(null); }} onSave={saveClient} />}
     </div>
