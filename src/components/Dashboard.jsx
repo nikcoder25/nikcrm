@@ -25,6 +25,7 @@ export default function Dashboard({ session, onSignOut }) {
   const [keywords, setKeywords] = useState([]);
   const [keywordHistory, setKeywordHistory] = useState([]);
   const [reports, setReports] = useState([]);
+  const [retainers, setRetainers] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
   const [tab, setTab] = useState("overview");
   const [loading, setLoading] = useState(true);
@@ -56,7 +57,7 @@ export default function Dashboard({ session, onSignOut }) {
   // full-screen loader is reserved for the very first load.
   const refresh = async () => {
     try {
-      const { clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports } = await api.load();
+      const { clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers } = await api.load();
       setClients(clients || []);
       setTasks(tasks || []);
       setPayments(payments || []);
@@ -65,6 +66,7 @@ export default function Dashboard({ session, onSignOut }) {
       setKeywords(keywords || []);
       setKeywordHistory(keyword_history || []);
       setReports(client_reports || []);
+      setRetainers(client_retainers || []);
     } catch (e) {
       handleErr(e, "Could not reach the database.");
     }
@@ -176,11 +178,12 @@ export default function Dashboard({ session, onSignOut }) {
                   keywordHistory={keywordHistory}
                   deliverables={deliverables.filter((d) => d.client_id === detailClient.id)}
                   reports={reports.filter((r) => r.client_id === detailClient.id)}
+                  retainers={retainers.filter((r) => r.client_id === detailClient.id)}
                   isAdmin={isAdmin}
                   onBack={backToClients}
                   onEdit={(c) => { setEditing(c); setShowForm(true); }}
                   onDeleteClient={delClient}
-                  onChanged={load}
+                  onChanged={refresh}
                 />
               ) : (
                 <Panel>
@@ -202,7 +205,7 @@ export default function Dashboard({ session, onSignOut }) {
 
             <div style={{ padding: 28 }}>
               {loading ? <Center>Loading your board...</Center> :
-                tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} /> :
+                tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} /> :
                 tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
                 tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
                 tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} /> :

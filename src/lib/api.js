@@ -105,3 +105,7 @@ export const deleteKeyword = (id) => call("keywordDelete", { id });
 /* ---------------- monthly reports (per-client narrative) ---------------- */
 export const saveReport = (client_id, period, summary) => call("reportSave", { client_id, period, summary });
 export const deleteReport = (id) => call("reportDelete", { id });
+
+/* ---------------- retainers (agreed monthly scope per client) ---------------- */
+export const saveRetainer = (client_id, type, quantity) => call("retainerSave", { client_id, type, quantity });
+export const deleteRetainer = (id) => call("retainerDelete", { id });

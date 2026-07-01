@@ -112,11 +112,22 @@ create table if not exists client_reports (
   unique (client_id, period)
 );
 
+-- Client retainers: the agreed monthly scope (included quantity per deliverable
+-- type). Compared live against delivered deliverables to flag scope creep.
+create table if not exists client_retainers (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  type text not null,                      -- deliverable type (reuses task types)
+  quantity integer default 0,
+  created_at timestamptz default now(),
+  unique (client_id, type)
+);
+
 -- ============================================================
 -- Indexes. Postgres does not auto-index FK columns; without these,
 -- per-client lookups and ON DELETE CASCADE degrade linearly with data size.
--- (payments and client_reports are covered by their unique constraints,
--- which lead with client_id.)
+-- (payments, client_reports and client_retainers are covered by their
+-- unique constraints, which lead with client_id.)
 -- ============================================================
 create index if not exists idx_tasks_client on tasks (client_id);
 create index if not exists idx_resources_client on resources (client_id);

@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import { Empty } from "./ui";
 import { KeywordRows, KeywordForm, keywordSummary } from "./Keywords";
+import ClientScope from "./ClientScope";
 import ClientReport from "./ClientReport";
 
 const fmtSize = (n) => {
@@ -34,7 +35,7 @@ function Detail({ label, value }) {
   );
 }
 
-export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
+export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], retainers = [], isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -186,7 +187,9 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
           </div>
         </div>
 
-        <ClientReport client={client} keywords={keywords} deliverables={deliverables} reports={reports} onChanged={onChanged} />
+        <ClientScope client={client} retainers={retainers} deliverables={deliverables} onChanged={onChanged} />
+
+        <ClientReport client={client} keywords={keywords} deliverables={deliverables} reports={reports} retainers={retainers} onChanged={onChanged} />
 
         <button className="no-print" style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 22, justifyContent: "center" }} onClick={() => onEdit(client)}>
           <Pencil size={15} /> Edit client details
