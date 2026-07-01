@@ -11,6 +11,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Team login** with one shared password (set an optional second password for admins)
 - **Roles**: admins can delete clients; everyone else can do everything else
 - **Clients**: add, edit, delete — status, source, package, team, dates, notes, monthly fee
+- **Client detail view**: click any client to see everything in one place, plus a **Resources** panel — attach links (Google Drive, Canva, Sheets…) *and* upload job files (stored in Netlify Blobs, up to 4 MB each)
 - **Task Board** (kanban): Guest Post, On-Page, Backlink, Anchor Text, Blog, Audit, Schema. Assign people, move To Do → In Progress → Done
 - **Revenue**: MRR, collected vs pending per month, revenue by source, and a per-client payment tracker (Pending / Paid / Overdue)
 - **Team** view: who has how many clients and tasks
@@ -98,5 +99,6 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
 
 ## Notes
 - **Security model.** This is a lightweight internal tool: access is gated by a shared password that the browser sends with each API request, and the database is only reachable through the Netlify Function — never directly from the browser. Set strong passwords and share them carefully. For per-person accounts you'd add a real auth provider later.
+- **Uploaded files** are stored in **Netlify Blobs**, which is enabled automatically for any site with functions — no setup. Downloads are also password-gated (served through the function, never a public URL). Limit is 4 MB per file; for bigger assets, attach a link instead.
 - Deliverables and keyword-rank tracking can be added next; the data layer is ready to extend.
 - Set each client's monthly fee in the client form — the Revenue tab rolls up from there.
