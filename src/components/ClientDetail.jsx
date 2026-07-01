@@ -32,7 +32,7 @@ function Detail({ label, value }) {
   );
 }
 
-export default function ClientDetail({ client, resources, keywords = [], deliverables = [], reports = [], isAdmin, onClose, onEdit, onDeleteClient, onChanged }) {
+export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], isAdmin, onClose, onEdit, onDeleteClient, onChanged }) {
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -178,7 +178,7 @@ export default function ClientDetail({ client, resources, keywords = [], deliver
             <button style={btn(accent, "#fff")} disabled={busy} onClick={() => { setKwEditing(null); setKwForm(true); }}><Plus size={15} /> Add keyword</button>
           </div>
           <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
-            <KeywordRows keywords={keywords} onEdit={(k) => { setKwEditing(k); setKwForm(true); }} onDelete={removeKeyword} />
+            <KeywordRows keywords={keywords} history={keywordHistory} onEdit={(k) => { setKwEditing(k); setKwForm(true); }} onDelete={removeKeyword} />
           </div>
         </div>
 

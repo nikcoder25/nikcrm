@@ -90,6 +90,15 @@ create table if not exists keywords (
   created_at timestamptz default now()
 );
 
+-- Keyword rank history: one row appended each time a keyword's rank changes to a
+-- real value (on create and on rank-changing updates). Powers the trend chart.
+create table if not exists keyword_history (
+  id uuid primary key default gen_random_uuid(),
+  keyword_id uuid references keywords(id) on delete cascade,
+  rank integer,
+  recorded_at timestamptz default now()
+);
+
 -- Client monthly reports: the free-text "wins" narrative, one per client per
 -- month. Rankings/deliverables in the report are assembled live from the tables
 -- above; only this narrative is stored.

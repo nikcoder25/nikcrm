@@ -96,6 +96,12 @@ async function ensureSchema(sql) {
     notes text default '',
     created_at timestamptz default now()
   )`;
+  await sql`create table if not exists keyword_history (
+    id uuid primary key default gen_random_uuid(),
+    keyword_id uuid references keywords(id) on delete cascade,
+    rank integer,
+    recorded_at timestamptz default now()
+  )`;
   await sql`create table if not exists client_reports (
     id uuid primary key default gen_random_uuid(),
     client_id uuid references clients(id) on delete cascade,
@@ -200,7 +206,7 @@ export default async (req) => {
     await ensureSchema(sql);
     switch (action) {
       case "load": {
-        const [clients, tasks, payments, resources, deliverables, keywords, client_reports] = await Promise.all([
+        const [clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports] = await Promise.all([
           sql`select * from clients order by created_at desc`,
           sql`select * from tasks order by created_at desc`,
           sql`select * from payments`,
@@ -208,9 +214,10 @@ export default async (req) => {
               from resources order by created_at desc`,
           sql`select * from deliverables order by created_at desc`,
           sql`select * from keywords order by created_at desc`,
+          sql`select id, keyword_id, rank, recorded_at from keyword_history order by recorded_at asc`,
           sql`select id, client_id, period, summary, updated_at from client_reports`,
         ]);
-        return json({ clients, tasks, payments, resources, deliverables, keywords, client_reports });
+        return json({ clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports });
       }
 
       case "clientSave": {
@@ -341,8 +348,13 @@ export default async (req) => {
         if (!k.client_id) return json({ error: "Pick a client for the keyword." }, 400);
         const cur = toRank(k.current_rank);
         const checkedAt = cur == null ? null : new Date().toISOString();
-        await sql`insert into keywords (client_id, keyword, current_rank, previous_rank, target_url, checked_at, notes)
-          values (${k.client_id}, ${k.keyword || ""}, ${cur}, ${null}, ${k.target_url || ""}, ${checkedAt}, ${k.notes || ""})`;
+        const created = await sql`insert into keywords (client_id, keyword, current_rank, previous_rank, target_url, checked_at, notes)
+          values (${k.client_id}, ${k.keyword || ""}, ${cur}, ${null}, ${k.target_url || ""}, ${checkedAt}, ${k.notes || ""})
+          returning id`;
+        // Record the first rank point so the history chart has a starting value.
+        if (cur != null && created.length) {
+          await sql`insert into keyword_history (keyword_id, rank) values (${created[0].id}, ${cur})`;
+        }
         return json({ ok: true });
       }
 
@@ -362,6 +374,10 @@ export default async (req) => {
           keyword=${k.keyword || ""}, current_rank=${cur}, previous_rank=${previous_rank ?? null},
           target_url=${k.target_url || ""}, checked_at=${checked_at ?? null}, notes=${k.notes || ""}
           where id=${k.id}`;
+        // Append a history point whenever the rank actually changes to a real value.
+        if (rankChanged && cur != null) {
+          await sql`insert into keyword_history (keyword_id, rank) values (${k.id}, ${cur})`;
+        }
         return json({ ok: true });
       }
 
