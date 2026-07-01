@@ -85,7 +85,25 @@ async function ensureSchema(sql) {
     notes text default '',
     created_at timestamptz default now()
   )`;
+  await sql`create table if not exists keywords (
+    id uuid primary key default gen_random_uuid(),
+    client_id uuid references clients(id) on delete cascade,
+    keyword text default '',
+    current_rank integer,                    -- lower is better; null = not ranked / untracked
+    previous_rank integer,                   -- rolled from current_rank on each rank change
+    target_url text default '',
+    checked_at timestamptz,                  -- when the current_rank was last recorded
+    notes text default '',
+    created_at timestamptz default now()
+  )`;
   schemaReady = true;
+}
+
+// Rank is a positive integer or null (unranked). Coerce loosely from the UI.
+function toRank(v) {
+  if (v === "" || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
 // Auth model: a shared team password gates everything. An optional separate
@@ -173,15 +191,16 @@ export default async (req) => {
     await ensureSchema(sql);
     switch (action) {
       case "load": {
-        const [clients, tasks, payments, resources, deliverables] = await Promise.all([
+        const [clients, tasks, payments, resources, deliverables, keywords] = await Promise.all([
           sql`select * from clients order by created_at desc`,
           sql`select * from tasks order by created_at desc`,
           sql`select * from payments`,
           sql`select id, client_id, kind, label, url, blob_key, filename, content_type, size, created_by, created_at
               from resources order by created_at desc`,
           sql`select * from deliverables order by created_at desc`,
+          sql`select * from keywords order by created_at desc`,
         ]);
-        return json({ clients, tasks, payments, resources, deliverables });
+        return json({ clients, tasks, payments, resources, deliverables, keywords });
       }
 
       case "clientSave": {
@@ -304,6 +323,41 @@ export default async (req) => {
       case "deliverableDelete": {
         // Not admin-gated — only client deletion is.
         await sql`delete from deliverables where id=${payload.id}`;
+        return json({ ok: true });
+      }
+
+      case "keywordCreate": {
+        const k = payload;
+        if (!k.client_id) return json({ error: "Pick a client for the keyword." }, 400);
+        const cur = toRank(k.current_rank);
+        const checkedAt = cur == null ? null : new Date().toISOString();
+        await sql`insert into keywords (client_id, keyword, current_rank, previous_rank, target_url, checked_at, notes)
+          values (${k.client_id}, ${k.keyword || ""}, ${cur}, ${null}, ${k.target_url || ""}, ${checkedAt}, ${k.notes || ""})`;
+        return json({ ok: true });
+      }
+
+      case "keywordUpdate": {
+        const k = payload;
+        if (!k.id) return json({ error: "Missing keyword id." }, 400);
+        const rows = await sql`select current_rank, previous_rank, checked_at from keywords where id=${k.id} limit 1`;
+        if (!rows.length) return json({ error: "Keyword not found." }, 404);
+        const existing = rows[0];
+        const cur = toRank(k.current_rank);
+        // Roll the old current_rank into previous_rank only when the rank actually
+        // changes, so movement stays meaningful across plain metadata edits.
+        const rankChanged = (cur ?? null) !== (existing.current_rank ?? null);
+        const previous_rank = rankChanged ? existing.current_rank : existing.previous_rank;
+        const checked_at = rankChanged ? new Date().toISOString() : existing.checked_at;
+        await sql`update keywords set
+          keyword=${k.keyword || ""}, current_rank=${cur}, previous_rank=${previous_rank ?? null},
+          target_url=${k.target_url || ""}, checked_at=${checked_at ?? null}, notes=${k.notes || ""}
+          where id=${k.id}`;
+        return json({ ok: true });
+      }
+
+      case "keywordDelete": {
+        // Not admin-gated — only client deletion is.
+        await sql`delete from keywords where id=${payload.id}`;
         return json({ ok: true });
       }
 
