@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
-import { X, Pencil, Trash2, Paperclip, Link2, FileText, Upload, ExternalLink, Search, Plus } from "lucide-react";
-import { ink, accent, tint, disp, BD, BDt, SH, SHs, btn, iconBtn, overlay, input, lbl } from "../lib/theme";
+import { ArrowLeft, Pencil, Trash2, Paperclip, Link2, FileText, Upload, ExternalLink, Search, Plus } from "lucide-react";
+import { ink, accent, tint, disp, BD, BDt, SH, SHs, btn, iconBtn, input, lbl } from "../lib/theme";
 import { STATUS_LABEL } from "../lib/constants";
 import { money } from "../lib/format";
 import {
@@ -18,9 +18,11 @@ const fmtSize = (n) => {
   return `${(b / 1024 / 1024).toFixed(1)} MB`;
 };
 
-const wideModal = {
-  background: "#fff", borderRadius: 18, padding: 26, width: "100%", maxWidth: 620,
-  maxHeight: "92vh", overflowY: "auto", border: BD, boxShadow: "8px 8px 0 " + ink,
+// The detail view is now its own page (URL: /clients/:id) rather than a modal
+// overlay, so it flows in the normal document instead of a fixed-position card.
+const pageCard = {
+  background: "#fff", borderRadius: 18, padding: 26, width: "100%", maxWidth: 720,
+  margin: "0 auto", border: BD, boxShadow: SH,
 };
 
 function Detail({ label, value }) {
@@ -32,7 +34,7 @@ function Detail({ label, value }) {
   );
 }
 
-export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], isAdmin, onClose, onEdit, onDeleteClient, onChanged }) {
+export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -83,8 +85,11 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
 
   return (
     <>
-    <div style={overlay} onClick={onClose}>
-      <div style={wideModal} onClick={(e) => e.stopPropagation()}>
+    <div>
+      <button className="no-print" style={{ ...btn("#fff", ink), marginBottom: 18 }} onClick={onBack}>
+        <ArrowLeft size={16} /> Back to clients
+      </button>
+      <div style={pageCard}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
           <div>
             <div style={{ fontFamily: disp, fontSize: 22, lineHeight: 1.1 }}>{client.name}</div>
@@ -96,7 +101,6 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
           <div style={{ display: "flex", gap: 8 }}>
             <button style={iconBtn} title="Edit" onClick={() => onEdit(client)}><Pencil size={16} /></button>
             {isAdmin && <button style={iconBtn} title="Delete client" onClick={() => onDeleteClient(client.id)}><Trash2 size={16} /></button>}
-            <button style={iconBtn} title="Close" onClick={onClose}><X size={18} /></button>
           </div>
         </div>
 
