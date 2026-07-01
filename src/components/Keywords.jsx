@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Plus, Pencil, Trash2, X, ArrowUp, ArrowDown, Minus, ExternalLink, Search, Target, Download } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, btn, iconBtn, overlay, modal, lbl, input } from "../lib/theme";
 import { downloadCsv, keywordsCsv } from "../lib/csv";
@@ -28,27 +28,92 @@ function MoveChip({ kw }) {
 
 const rankLabel = (r) => (r == null ? "—" : `#${r}`);
 
+// SVG line chart of rank over time. Lower rank (better) is drawn higher.
+function RankChart({ points, width = 104, height = 28, dots = false }) {
+  const pts = points.filter((p) => p.rank != null).map((p) => Number(p.rank));
+  if (pts.length < 2) return null;
+  const min = Math.min(...pts), max = Math.max(...pts), pad = 4;
+  const x = (i) => pad + (i / (pts.length - 1)) * (width - 2 * pad);
+  const y = (r) => (max === min ? height / 2 : pad + ((r - min) / (max - min)) * (height - 2 * pad));
+  const d = pts.map((r, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(r).toFixed(1)}`).join(" ");
+  const improved = pts[pts.length - 1] <= pts[0]; // rank went down or equal = improved/steady
+  const color = improved ? "#1f9d57" : "#c0392b";
+  return (
+    <svg width={width} height={height} style={{ display: "block", overflow: "visible" }}>
+      <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      {dots && pts.map((r, i) => <circle key={i} cx={x(i)} cy={y(r)} r="3" fill={color} />)}
+      {!dots && <circle cx={x(pts.length - 1)} cy={y(pts[pts.length - 1])} r="2.5" fill={color} />}
+    </svg>
+  );
+}
+
+function KeywordHistoryModal({ keyword, points, onClose }) {
+  const pts = points.filter((p) => p.rank != null);
+  return (
+    <div style={overlay} onClick={(e) => { e.stopPropagation(); onClose(); }}>
+      <div style={{ ...modal, maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: disp, fontSize: 18, marginBottom: 4 }}>
+          <span>Rank history</span>
+          <button style={iconBtn} onClick={onClose}><X size={18} /></button>
+        </div>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#4b4560", marginBottom: 14 }}>{keyword.keyword}</div>
+        {pts.length < 2 ? (
+          <Empty>Not enough history yet — change this keyword's rank a couple of times to build the chart.</Empty>
+        ) : (
+          <>
+            <div style={{ border: BDt, borderRadius: 12, padding: 16, background: "#faf8f2", marginBottom: 14 }}>
+              <RankChart points={pts} width={496} height={170} dots />
+            </div>
+            <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
+              {[...pts].reverse().map((p, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 14px", borderBottom: "1px solid #f0ece2", fontSize: 13, fontWeight: 700 }}>
+                  <span style={{ color: "#6b6580" }}>{String(p.recorded_at).slice(0, 10)}</span>
+                  <span>#{p.rank}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Shared per-client keyword table. Used in the Keywords tab and in ClientDetail.
-export function KeywordRows({ keywords, onEdit, onDelete }) {
+export function KeywordRows({ keywords, history = [], onEdit, onDelete }) {
+  const [histKw, setHistKw] = useState(null);
+  const byKw = useMemo(() => {
+    const m = new Map();
+    for (const h of history) { if (!m.has(h.keyword_id)) m.set(h.keyword_id, []); m.get(h.keyword_id).push(h); }
+    return m;
+  }, [history]);
   if (!keywords.length) return <Empty>No keywords tracked yet.</Empty>;
   return (
     <div>
-      {keywords.map((k) => (
-        <div key={k.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 20px", borderBottom: "2px solid #f0ece2", flexWrap: "wrap" }}>
-          <div style={{ flex: 1, minWidth: 150 }}>
-            <div style={{ fontWeight: 800, fontSize: 14 }}>{k.keyword || "(untitled)"}</div>
-            {k.target_url && (
-              <a href={k.target_url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "#6b6580", fontWeight: 700, marginTop: 2, textDecoration: "none", maxWidth: 260, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                <Target size={12} /> {k.target_url.replace(/^https?:\/\//, "")}
-              </a>
-            )}
+      {keywords.map((k) => {
+        const pts = byKw.get(k.id) || [];
+        const hasChart = pts.filter((p) => p.rank != null).length >= 2;
+        return (
+          <div key={k.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 20px", borderBottom: "2px solid #f0ece2", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 150 }}>
+              <div style={{ fontWeight: 800, fontSize: 14 }}>{k.keyword || "(untitled)"}</div>
+              {k.target_url && (
+                <a href={k.target_url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "#6b6580", fontWeight: 700, marginTop: 2, textDecoration: "none", maxWidth: 260, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                  <Target size={12} /> {k.target_url.replace(/^https?:\/\//, "")}
+                </a>
+              )}
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 900, fontFamily: disp, minWidth: 42, textAlign: "right" }}>{rankLabel(k.current_rank)}</span>
+            <MoveChip kw={k} />
+            {hasChart
+              ? <button title="Rank history" onClick={() => setHistKw(k)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", width: 104 }}><RankChart points={pts} /></button>
+              : <span style={{ width: 104, fontSize: 11, color: "#a39db5", fontWeight: 700, textAlign: "center" }}>—</span>}
+            <button style={iconBtn} title="Edit" onClick={() => onEdit(k)}><Pencil size={15} /></button>
+            <button style={iconBtn} title="Delete" onClick={() => onDelete(k.id)}><Trash2 size={15} /></button>
           </div>
-          <span style={{ fontSize: 14, fontWeight: 900, fontFamily: disp, minWidth: 42, textAlign: "right" }}>{rankLabel(k.current_rank)}</span>
-          <MoveChip kw={k} />
-          <button style={iconBtn} title="Edit" onClick={() => onEdit(k)}><Pencil size={15} /></button>
-          <button style={iconBtn} title="Delete" onClick={() => onDelete(k.id)}><Trash2 size={15} /></button>
-        </div>
-      ))}
+        );
+      })}
+      {histKw && <KeywordHistoryModal keyword={histKw} points={byKw.get(histKw.id) || []} onClose={() => setHistKw(null)} />}
     </div>
   );
 }
@@ -104,7 +169,7 @@ export function keywordSummary(keywords) {
 }
 
 /* ---------------- Keywords tab ---------------- */
-export default function Keywords({ clients, keywords, onCreate, onUpdate, onDelete }) {
+export default function Keywords({ clients, keywords, history = [], onCreate, onUpdate, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [preClient, setPreClient] = useState("");
@@ -148,7 +213,7 @@ export default function Keywords({ clients, keywords, onCreate, onUpdate, onDele
                   </span>
                   <button style={iconBtn} title="Add for this client" onClick={() => openAdd(client.id)}><Plus size={15} /></button>
                 </div>
-                <KeywordRows keywords={items} onEdit={openEdit} onDelete={onDelete} />
+                <KeywordRows keywords={items} history={history} onEdit={openEdit} onDelete={onDelete} />
               </Panel>
             );
           })}

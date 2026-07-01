@@ -22,6 +22,7 @@ export default function Dashboard({ session, onSignOut }) {
   const [resources, setResources] = useState([]);
   const [deliverables, setDeliverables] = useState([]);
   const [keywords, setKeywords] = useState([]);
+  const [keywordHistory, setKeywordHistory] = useState([]);
   const [reports, setReports] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
   const [tab, setTab] = useState("overview");
@@ -45,13 +46,14 @@ export default function Dashboard({ session, onSignOut }) {
   const load = async () => {
     setLoading(true); setError("");
     try {
-      const { clients, tasks, payments, resources, deliverables, keywords, client_reports } = await api.load();
+      const { clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports } = await api.load();
       setClients(clients || []);
       setTasks(tasks || []);
       setPayments(payments || []);
       setResources(resources || []);
       setDeliverables(deliverables || []);
       setKeywords(keywords || []);
+      setKeywordHistory(keyword_history || []);
       setReports(client_reports || []);
     } catch (e) {
       handleErr(e, "Could not reach the database.");
@@ -139,7 +141,7 @@ export default function Dashboard({ session, onSignOut }) {
             tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={(c) => setDetailId(c.id)} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
             tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
             tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} /> :
-            tab === "keywords" ? <Keywords clients={clients} keywords={keywords} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} /> :
+            tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} /> :
             tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
             <Team clients={clients} tasks={tasks} />}
         </div>
@@ -150,6 +152,7 @@ export default function Dashboard({ session, onSignOut }) {
           client={detailClient}
           resources={resources.filter((r) => r.client_id === detailClient.id)}
           keywords={keywords.filter((k) => k.client_id === detailClient.id)}
+          keywordHistory={keywordHistory}
           deliverables={deliverables.filter((d) => d.client_id === detailClient.id)}
           reports={reports.filter((r) => r.client_id === detailClient.id)}
           isAdmin={isAdmin}

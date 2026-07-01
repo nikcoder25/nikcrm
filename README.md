@@ -16,7 +16,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Client detail view**: click any client to see everything in one place, plus a **Resources** panel — attach links (Google Drive, Canva, Sheets…) *and* upload job files (stored in Netlify Blobs, up to 4 MB each)
 - **Task Board** (kanban): Guest Post, On-Page, Backlink, Anchor Text, Blog, Audit, Schema. Assign people, move To Do → In Progress → Done
 - **Deliverables**: track what you owe each client — type, quantity, due date, and status (Planned / In Progress / Delivered / Blocked), grouped by client with a per-client delivered/total summary
-- **Keywords**: manual keyword-rank tracking per client — current rank, movement vs the previous rank (up/down/same), and target URL, with avg-rank and top-10 summaries. Also surfaced inside each client's detail view
+- **Keywords**: manual keyword-rank tracking per client — current rank, movement vs the previous rank (up/down/same), target URL, and a **rank-over-time trend chart** (each rank change is recorded), with avg-rank and top-10 summaries. Also surfaced inside each client's detail view
 - **Revenue**: MRR, collected vs pending per month, revenue by source, and a per-client payment tracker (Pending / Paid / Overdue)
 - **Team** view: who has how many clients and tasks
 
