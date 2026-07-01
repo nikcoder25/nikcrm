@@ -59,16 +59,27 @@ async function ensureSchema(sql) {
 }
 
 // Auth model: a shared team password gates everything. An optional separate
-// admin password unlocks destructive actions (deleting clients). If neither
-// env var is set (e.g. local dev), the API is open so you can try it quickly.
+// admin password unlocks destructive actions (deleting clients).
+//
+// If NO password is configured we FAIL CLOSED: the API refuses every request
+// with a clear operator message. A misconfigured deploy (forgotten or mistyped
+// APP_PASSWORD) must never silently expose the whole database to the public.
+// For local dev, set APP_PASSWORD in .env (see .env.example).
+function authConfigured() {
+  return Boolean(process.env.APP_PASSWORD || process.env.ADMIN_PASSWORD);
+}
+
+// Returns "admin" / "member" for a correct password, or null for a wrong one.
+// Only call this once authConfigured() is true.
 function resolveRole(pw) {
   const APP = process.env.APP_PASSWORD || "";
   const ADMIN = process.env.ADMIN_PASSWORD || "";
-  if (!APP && !ADMIN) return "admin";          // nothing configured -> open
   if (ADMIN && pw === ADMIN) return "admin";
   if (APP && pw === APP) return "member";
   return null;                                  // wrong / missing password
 }
+
+const NOT_CONFIGURED = "Login isn't set up yet. Set APP_PASSWORD in Netlify.";
 
 export default async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -79,12 +90,14 @@ export default async (req) => {
 
   // Login: validate the password and hand back the role for the UI.
   if (action === "login") {
+    if (!authConfigured()) return json({ error: NOT_CONFIGURED }, 503);
     const role = resolveRole(payload.password || "");
     if (!role) return json({ error: "Wrong password. Ask your team lead for it." }, 401);
     return json({ ok: true, role });
   }
 
   // Every other action requires a valid password in the header.
+  if (!authConfigured()) return json({ error: NOT_CONFIGURED }, 503);
   const pw = req.headers.get("x-app-password") || "";
   const role = resolveRole(pw);
   if (!role) return json({ error: "Unauthorized" }, 401);
