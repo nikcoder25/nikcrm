@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import { Empty } from "./ui";
 import { KeywordRows, KeywordForm, keywordSummary } from "./Keywords";
+import ClientReport from "./ClientReport";
 
 const fmtSize = (n) => {
   const b = Number(n) || 0;
@@ -31,7 +32,7 @@ function Detail({ label, value }) {
   );
 }
 
-export default function ClientDetail({ client, resources, keywords = [], isAdmin, onClose, onEdit, onDeleteClient, onChanged }) {
+export default function ClientDetail({ client, resources, keywords = [], deliverables = [], reports = [], isAdmin, onClose, onEdit, onDeleteClient, onChanged }) {
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -181,7 +182,9 @@ export default function ClientDetail({ client, resources, keywords = [], isAdmin
           </div>
         </div>
 
-        <button style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 22, justifyContent: "center" }} onClick={() => onEdit(client)}>
+        <ClientReport client={client} keywords={keywords} deliverables={deliverables} reports={reports} onChanged={onChanged} />
+
+        <button className="no-print" style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 22, justifyContent: "center" }} onClick={() => onEdit(client)}>
           <Pencil size={15} /> Edit client details
         </button>
       </div>

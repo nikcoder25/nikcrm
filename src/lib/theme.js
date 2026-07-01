@@ -34,4 +34,14 @@ export const globalCss = `
     .ni span { display: none; }
     .board { grid-template-columns: 1fr !important; }
   }
+  .print-only { display: none; }
+  @media print {
+    /* Print only the report: hide everything, then reveal .ga-print. */
+    body * { visibility: hidden; }
+    .ga-print, .ga-print * { visibility: visible; }
+    .ga-print { position: absolute; left: 0; top: 0; width: 100%; padding: 0 6px; box-shadow: none !important; border: none !important; }
+    .no-print { display: none !important; }
+    .print-only { display: block !important; }
+    @page { margin: 14mm; }
+  }
 `;

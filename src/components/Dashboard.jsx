@@ -21,6 +21,7 @@ export default function Dashboard({ session, onSignOut }) {
   const [resources, setResources] = useState([]);
   const [deliverables, setDeliverables] = useState([]);
   const [keywords, setKeywords] = useState([]);
+  const [reports, setReports] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
   const [tab, setTab] = useState("clients");
   const [loading, setLoading] = useState(true);
@@ -43,13 +44,14 @@ export default function Dashboard({ session, onSignOut }) {
   const load = async () => {
     setLoading(true); setError("");
     try {
-      const { clients, tasks, payments, resources, deliverables, keywords } = await api.load();
+      const { clients, tasks, payments, resources, deliverables, keywords, client_reports } = await api.load();
       setClients(clients || []);
       setTasks(tasks || []);
       setPayments(payments || []);
       setResources(resources || []);
       setDeliverables(deliverables || []);
       setKeywords(keywords || []);
+      setReports(client_reports || []);
     } catch (e) {
       handleErr(e, "Could not reach the database.");
     }
@@ -145,6 +147,8 @@ export default function Dashboard({ session, onSignOut }) {
           client={detailClient}
           resources={resources.filter((r) => r.client_id === detailClient.id)}
           keywords={keywords.filter((k) => k.client_id === detailClient.id)}
+          deliverables={deliverables.filter((d) => d.client_id === detailClient.id)}
+          reports={reports.filter((r) => r.client_id === detailClient.id)}
           isAdmin={isAdmin}
           onClose={() => setDetailId(null)}
           onEdit={(c) => { setEditing(c); setShowForm(true); }}

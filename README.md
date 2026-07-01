@@ -11,6 +11,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Team login** with one shared password (set an optional second password for admins)
 - **Roles**: admins can delete clients; everyone else can do everything else
 - **Clients**: add, edit, delete — status, source, package, team, dates, notes, monthly fee
+- **Monthly Report**: inside each client's detail view, generate a printable monthly snapshot — keyword rankings (current/previous/movement, top-10, avg, net improvement), deliverables with a delivered/total rollup, and a saved free-text "wins" narrative. **Print / Export** opens a clean print-friendly layout (Save as PDF)
 - **Client detail view**: click any client to see everything in one place, plus a **Resources** panel — attach links (Google Drive, Canva, Sheets…) *and* upload job files (stored in Netlify Blobs, up to 4 MB each)
 - **Task Board** (kanban): Guest Post, On-Page, Backlink, Anchor Text, Blog, Audit, Schema. Assign people, move To Do → In Progress → Done
 - **Deliverables**: track what you owe each client — type, quantity, due date, and status (Planned / In Progress / Delivered / Blocked), grouped by client with a per-client delivered/total summary
@@ -97,6 +98,7 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
         ├── Team.jsx            Per-member workload
         ├── ClientForm.jsx      Add / edit client modal
         ├── ClientDetail.jsx    Client detail view + resources (links & files)
+        ├── ClientReport.jsx    Printable per-client monthly report + narrative
         └── ui.jsx              Small shared pieces (Field, Pick, Panel, RevCard...)
 ```
 
