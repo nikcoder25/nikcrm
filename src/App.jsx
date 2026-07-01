@@ -1,22 +1,11 @@
-import React, { useEffect, useState } from "react";
-import { supabase, supabaseConfigured } from "./lib/supabaseClient";
-import { Center } from "./components/ui";
-import SetupNeeded from "./components/SetupNeeded";
+import React, { useState } from "react";
+import { getSession, signOut } from "./lib/api";
 import Login from "./components/Login";
 import Dashboard from "./components/Dashboard";
 
 export default function App() {
-  const [session, setSession] = useState(null);
-  const [ready, setReady] = useState(false);
+  const [session, setSession] = useState(getSession());
 
-  useEffect(() => {
-    if (!supabaseConfigured) return;
-    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true); });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
-    return () => sub.subscription.unsubscribe();
-  }, []);
-
-  if (!supabaseConfigured) return <SetupNeeded />;
-  if (!ready) return <Center>Loading...</Center>;
-  return session ? <Dashboard session={session} /> : <Login />;
+  if (!session) return <Login onLogin={setSession} />;
+  return <Dashboard session={session} onSignOut={() => { signOut(); setSession(null); }} />;
 }
