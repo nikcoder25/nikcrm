@@ -1,6 +1,10 @@
 [build]
   command = "npm run build"
   publish = "dist"
+  functions = "netlify/functions"
+
+# Serverless API (talks to Netlify DB / Neon). Functions are matched before the
+# SPA rewrite below, so /api/data reaches the function, not index.html.
 
 # SPA fallback so page refreshes don't 404
 [[redirects]]

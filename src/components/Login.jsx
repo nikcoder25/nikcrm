@@ -1,31 +1,21 @@
 import React, { useState } from "react";
 import { Loader } from "lucide-react";
-import { supabase } from "../lib/supabaseClient";
+import { login } from "../lib/api";
 import { ink, accent, cream, tint, disp, BD, BDt, SHs, btn, globalCss } from "../lib/theme";
 import { Field } from "./ui";
 
-/* ---------------- Login / Signup ---------------- */
-export default function Login() {
-  const [mode, setMode] = useState("login");
+/* ---------------- Login (shared team password) ---------------- */
+export default function Login({ onLogin }) {
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
-  const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
-    setErr(""); setMsg(""); setBusy(true);
+    setErr(""); setBusy(true);
     try {
-      if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({ email, password: pw, options: { data: { full_name: name } } });
-        if (error) throw error;
-        setMsg("Account created. If email confirmation is on, check your inbox, then log in.");
-        setMode("login");
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
-        if (error) throw error;
-      }
+      const session = await login(name, pw);
+      onLogin(session);
     } catch (e) { setErr(e.message || "Something went wrong"); }
     setBusy(false);
   };
@@ -42,21 +32,16 @@ export default function Login() {
           </div>
         </div>
         <p style={{ fontSize: 13.5, color: "#6b6580", margin: "10px 0 18px", fontWeight: 500 }}>
-          {mode === "login" ? "Log in to your team's board." : "Create your account to join the team."}
+          Enter your name and the team password to open the board.
         </p>
-        {mode === "signup" && <Field label="Your name" value={name} onChange={setName} placeholder="e.g. Vivek" />}
-        <Field label="Email" value={email} onChange={setEmail} placeholder="you@email.com" type="email" />
-        <Field label="Password" value={pw} onChange={setPw} placeholder="min 6 characters" type="password" />
+        <Field label="Your name" value={name} onChange={setName} placeholder="e.g. Vivek" />
+        <Field label="Team password" value={pw} onChange={setPw} placeholder="shared team password" type="password" />
         {err && <p style={{ color: ink, background: tint, border: BDt, borderRadius: 8, padding: "8px 10px", fontSize: 13, marginTop: 12, fontWeight: 600 }}>{err}</p>}
-        {msg && <p style={{ color: accent, fontSize: 13, marginTop: 12, fontWeight: 700 }}>{msg}</p>}
         <button onClick={submit} disabled={busy} style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 18, justifyContent: "center" }}>
-          {busy ? <Loader size={16} className="spin" /> : (mode === "login" ? "Log in" : "Sign up")}
+          {busy ? <Loader size={16} className="spin" /> : "Enter board"}
         </button>
-        <p style={{ textAlign: "center", fontSize: 13, marginTop: 16, color: "#6b6580", fontWeight: 500 }}>
-          {mode === "login" ? "New here? " : "Have an account? "}
-          <button onClick={() => { setMode(mode === "login" ? "signup" : "login"); setErr(""); }} style={{ background: "none", border: "none", color: accent, fontWeight: 800, cursor: "pointer" }}>
-            {mode === "login" ? "Create account" : "Log in"}
-          </button>
+        <p style={{ textAlign: "center", fontSize: 12, marginTop: 16, color: "#6b6580", fontWeight: 500 }}>
+          Everyone on the team shares one password and sees the same board.
         </p>
       </div>
     </div>

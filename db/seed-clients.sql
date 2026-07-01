@@ -1,5 +1,7 @@
--- Optional: preload your 11 clients. Run AFTER schema.sql, in Supabase SQL Editor.
-insert into public.clients (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes) values
+-- Optional: preload your 11 clients. Run in the Neon SQL editor (Netlify DB >
+-- open in Neon), after the tables exist (open the app once so the API creates
+-- them, or run db/schema.sql first).
+insert into clients (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes) values
 ('platinumhvacllc.com','HVAC','active','Fiverr','Standard',0,'','2026-05','2026-06','low','monthly seo (8th month) | Order: zach_komorowski'),
 ('greenbaymovingco.com','Moving','active','Fiverr','Standard',0,'Sukhendra','2026-05','2026-06','low','monthly seo (9th month) | Order: zach_komorowski'),
 ('cbrookspaving.com','Paving','active','Fiverr','Standard',0,'','2026-05','2026-06','low','monthly seo (12th month) | Order: zach_komorowski | Sheet: https://www.canva.com/design/DAGvl9rjG6c/jX0B6OIeHWhaYH0Uz1I_Vg/edit?utm_content=DAGvl9rjG6c&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton'),

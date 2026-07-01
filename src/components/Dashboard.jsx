@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign } from "lucide-react";
-import { supabase } from "../lib/supabaseClient";
-import { ink, accent, cream, disp, BD, BDt, SHs, btn, globalCss } from "../lib/theme";
+import * as api from "../lib/api";
+import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
 import { Center } from "./ui";
 import Clients from "./Clients";
@@ -11,54 +11,48 @@ import Team from "./Team";
 import ClientForm from "./ClientForm";
 
 /* ---------------- Dashboard ---------------- */
-export default function Dashboard({ session }) {
-  const [profile, setProfile] = useState(null);
+export default function Dashboard({ session, onSignOut }) {
   const [clients, setClients] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [payments, setPayments] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
   const [tab, setTab] = useState("clients");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
 
-  const isAdmin = profile?.role === "admin";
-  const uid = session.user.id;
+  const isAdmin = session.role === "admin";
 
   const load = async () => {
-    setLoading(true);
-    const [{ data: prof }, { data: cl }, { data: tk }, { data: py }] = await Promise.all([
-      supabase.from("profiles").select("*").eq("id", uid).single(),
-      supabase.from("clients").select("*").order("created_at", { ascending: false }),
-      supabase.from("tasks").select("*").order("created_at", { ascending: false }),
-      supabase.from("payments").select("*"),
-    ]);
-    setProfile(prof || { full_name: session.user.email, role: "member" });
-    setClients(cl || []);
-    setTasks(tk || []);
-    setPayments(py || []);
+    setLoading(true); setError("");
+    try {
+      const { clients, tasks, payments } = await api.load();
+      setClients(clients || []);
+      setTasks(tasks || []);
+      setPayments(payments || []);
+    } catch (e) {
+      setError(e.message || "Could not reach the database.");
+    }
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
 
-  const saveClient = async (c) => {
-    if (c.id) {
-      const { id, ...rest } = c;
-      await supabase.from("clients").update(rest).eq("id", id);
-    } else {
-      await supabase.from("clients").insert({ ...c, created_by: uid });
-    }
-    setShowForm(false); setEditing(null); load();
+  // Wrap each mutation so a failure surfaces instead of silently doing nothing.
+  const run = async (fn) => {
+    try { await fn(); await load(); }
+    catch (e) { setError(e.message || "Something went wrong."); }
   };
-  const delClient = async (id) => { await supabase.from("clients").delete().eq("id", id); load(); };
-  const addTask = async (t) => { await supabase.from("tasks").insert(t); load(); };
-  const moveTask = async (id, status) => { await supabase.from("tasks").update({ status }).eq("id", id); load(); };
-  const delTask = async (id) => { await supabase.from("tasks").delete().eq("id", id); load(); };
-  const setPayment = async (client_id, month, patch) => {
-    const paid_date = patch.status === "paid" ? new Date().toISOString().slice(0, 10) : null;
-    await supabase.from("payments").upsert({ client_id, month, ...patch, paid_date }, { onConflict: "client_id,month" });
-    load();
-  };
+
+  const saveClient = (c) => run(async () => {
+    await api.saveClient(c.id ? c : { ...c, created_by: session.name });
+    setShowForm(false); setEditing(null);
+  });
+  const delClient = (id) => run(() => api.deleteClient(id));
+  const addTask = (t) => run(() => api.addTask(t));
+  const moveTask = (id, status) => run(() => api.moveTask(id, status));
+  const delTask = (id) => run(() => api.deleteTask(id));
+  const setPayment = (client_id, month, patch) => run(() => api.setPayment(client_id, month, patch));
 
   const NAV = [
     { k: "clients", l: "Clients", i: FolderKanban },
@@ -87,10 +81,10 @@ export default function Dashboard({ session }) {
         <div style={{ borderTop: "3px dashed rgba(255,255,255,.25)", paddingTop: 14 }}>
           <div style={{ background: accent, border: BD, borderRadius: 10, padding: "9px 11px", boxShadow: SHs, marginBottom: 10 }}>
             <div style={{ fontSize: 10, color: "#fff", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 800 }}>Signed in</div>
-            <div style={{ fontSize: 13, color: "#fff", fontWeight: 800, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{profile?.full_name || session.user.email}</div>
+            <div style={{ fontSize: 13, color: "#fff", fontWeight: 800, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{session.name}</div>
             <div style={{ fontSize: 11, color: "#e9deff", fontWeight: 700, marginTop: 1 }}>{isAdmin ? "Admin" : "Member"}</div>
           </div>
-          <button onClick={() => supabase.auth.signOut()} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", justifyContent: "center", padding: "9px", borderRadius: 9, border: BDt, background: "#fff", color: ink, fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+          <button onClick={onSignOut} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", justifyContent: "center", padding: "9px", borderRadius: 9, border: BDt, background: "#fff", color: ink, fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
             <LogOut size={15} /> Log out
           </button>
         </div>
@@ -103,6 +97,12 @@ export default function Dashboard({ session }) {
         </header>
 
         <div style={{ padding: 28 }}>
+          {error && (
+            <div style={{ background: tint, border: BD, borderRadius: 12, padding: "14px 18px", marginBottom: 20, fontWeight: 600, fontSize: 13.5, color: ink }}>
+              {error}
+              <button onClick={load} style={{ ...btn("#fff", ink), marginLeft: 14, padding: "5px 12px", fontSize: 12 }}>Retry</button>
+            </div>
+          )}
           {loading ? <Center>Loading your board...</Center> :
             tab === "clients" ? <Clients clients={clients} isAdmin={isAdmin} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
             tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
