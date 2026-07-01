@@ -1,10 +1,9 @@
 import { neon } from "@netlify/neon";
 
-// Netlify DB (Neon) connection, created lazily. neon() reads
-// NETLIFY_DATABASE_URL (set automatically once you provision a database for the
-// site) and throws if it is missing — so we only build it when a data action
-// actually needs it, keeping login usable and turning a missing DB into a clean
-// JSON error instead of a hard function crash.
+// Netlify DB (Neon) connection, created lazily. neon() reads NETLIFY_DATABASE_URL
+// (set when you provision Netlify DB, or added manually on the site). We only
+// build the client inside a data action — after the handler has verified the URL
+// is present — so login/auth keeps working even when the database is not set up.
 let _sql;
 function db() {
   if (!_sql) _sql = neon();
@@ -90,6 +89,13 @@ export default async (req) => {
   const role = resolveRole(pw);
   if (!role) return json({ error: "Unauthorized" }, 401);
   const isAdmin = role === "admin";
+
+  // Fail fast with a friendly 503 (not a raw @netlify/neon stack trace) when the
+  // database connection string is absent. Provision Netlify DB, or set
+  // NETLIFY_DATABASE_URL on the site (scoped to builds, functions, and runtime).
+  if (!process.env.NETLIFY_DATABASE_URL) {
+    return json({ error: "Database not configured. Set NETLIFY_DATABASE_URL." }, 503);
+  }
 
   try {
     const sql = db();
