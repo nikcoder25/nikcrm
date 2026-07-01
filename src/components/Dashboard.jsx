@@ -24,6 +24,14 @@ export default function Dashboard({ session, onSignOut }) {
 
   const isAdmin = session.role === "admin";
 
+  // A 401 means our stored password is no longer valid (e.g. it was rotated).
+  // Drop the stale session and bounce to the login screen instead of leaving
+  // the user stuck behind a permanent error banner.
+  const handleErr = (e, fallback) => {
+    if (e?.status === 401) { onSignOut(); return; }
+    setError(e?.message || fallback);
+  };
+
   const load = async () => {
     setLoading(true); setError("");
     try {
@@ -32,7 +40,7 @@ export default function Dashboard({ session, onSignOut }) {
       setTasks(tasks || []);
       setPayments(payments || []);
     } catch (e) {
-      setError(e.message || "Could not reach the database.");
+      handleErr(e, "Could not reach the database.");
     }
     setLoading(false);
   };
@@ -41,7 +49,7 @@ export default function Dashboard({ session, onSignOut }) {
   // Wrap each mutation so a failure surfaces instead of silently doing nothing.
   const run = async (fn) => {
     try { await fn(); await load(); }
-    catch (e) { setError(e.message || "Something went wrong."); }
+    catch (e) { handleErr(e, "Something went wrong."); }
   };
 
   const saveClient = (c) => run(async () => {
