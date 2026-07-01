@@ -1,8 +1,9 @@
 import React, { useState } from "react";
-import { Plus, Pencil, Trash2, X } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Download } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, SH, SHs, btn, iconBtn, sel, overlay, modal, lbl, input } from "../lib/theme";
 import { TASK_TYPES, typeLabel, DELIVERABLE_STATES } from "../lib/constants";
 import { isPastDue } from "../lib/format";
+import { downloadCsv, deliverablesCsv } from "../lib/csv";
 import { Panel, Empty, Field, Pick, Row } from "./ui";
 
 const STATUS_BG = { planned: "#f0ece2", in_progress: tint, delivered: "#d7f5df", blocked: "#f7dede" };
@@ -24,7 +25,10 @@ export default function Deliverables({ clients, deliverables, onCreate, onUpdate
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 18 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 18 }}>
+        <button style={btn("#fff", ink)} disabled={deliverables.length === 0} onClick={() => downloadCsv("deliverables.csv", deliverablesCsv(deliverables, clients))}>
+          <Download size={15} /> Export CSV
+        </button>
         <button style={btn(accent, "#fff")} disabled={clients.length === 0} onClick={() => openAdd()}>
           <Plus size={16} /> Add deliverable
         </button>
