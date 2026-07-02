@@ -12,7 +12,16 @@ export const TASK_TYPES = [
 ];
 export const typeLabel = (k) => (TASK_TYPES.find((t) => t.key === k) || TASK_TYPES[7]).label;
 
-export const TASK_STATES = [{ key: "todo", label: "To Do" }, { key: "doing", label: "In Progress" }, { key: "done", label: "Done" }];
+// Workflow: To Do → In Progress → Done (finished internally) → Delivered (handed to the client).
+export const TASK_STATES = [
+  { key: "todo", label: "To Do" },
+  { key: "doing", label: "In Progress" },
+  { key: "done", label: "Done" },
+  { key: "delivered", label: "Delivered" },
+];
+// A task is closed once the work is finished or delivered — used for "open
+// task" counts and overdue checks.
+export const isTaskClosed = (t) => t?.status === "done" || t?.status === "delivered";
 export const PAY_STATES = [{ key: "pending", label: "Pending" }, { key: "paid", label: "Paid" }, { key: "overdue", label: "Overdue" }];
 
 // Deliverables reuse TASK_TYPES for their "type"; these are their workflow states.
