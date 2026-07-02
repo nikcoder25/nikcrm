@@ -152,14 +152,14 @@ function GscPanel({ client }) {
           {daily.length >= 2 && (
             <div style={{ border: BDt, borderRadius: 12, background: "#faf8f2", padding: 14, marginBottom: 12 }}>
               <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 8 }}>Daily clicks — last {daily.length} days</div>
-              <div style={{ overflowX: "auto" }}><GscClicksChart daily={daily} /></div>
+              <div className="scroll-x"><GscClicksChart daily={daily} /></div>
             </div>
           )}
           {queries.length > 0 && (
             <div>
               <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 6 }}>Top queries{gsc.month ? ` — ${gsc.month}` : ""}</div>
-              <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <div className="scroll-x" style={{ border: BDt, borderRadius: 10 }}>
+                <table style={{ width: "100%", minWidth: 440, borderCollapse: "collapse", fontSize: 12.5 }}>
                   <thead>
                     <tr style={{ textAlign: "left", borderBottom: BDt, background: "#faf8f2" }}>
                       <th style={th}>Query</th>

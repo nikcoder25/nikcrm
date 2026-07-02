@@ -18,7 +18,9 @@ export const sel = { padding: "10px", borderRadius: 9, border: BDt, background: 
 export const lbl = { display: "block", fontSize: 12.5, fontWeight: 800, color: ink, margin: "13px 0 6px", textTransform: "uppercase", letterSpacing: "0.03em" };
 export const input = { width: "100%", padding: "11px 12px", borderRadius: 9, border: BDt, fontSize: 14, boxSizing: "border-box", color: ink, fontWeight: 600, fontFamily: "inherit" };
 export const overlay = { position: "fixed", inset: 0, background: "rgba(23,22,28,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 50 };
-export const modal = { background: "#fff", borderRadius: 18, padding: 26, width: "100%", maxWidth: 480, maxHeight: "92vh", overflowY: "auto", border: BD, boxShadow: "8px 8px 0 " + ink };
+// maxWidth is min()-capped so every modal fits phones (overlay pads 16px per
+// side); on desktop min() resolves to the px cap, so nothing changes there.
+export const modal = { background: "#fff", borderRadius: 18, padding: 26, width: "100%", maxWidth: "min(480px, calc(100vw - 32px))", maxHeight: "90vh", overflowY: "auto", border: BD, boxShadow: "8px 8px 0 " + ink };
 
 export const globalCss = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&family=Archivo+Black&display=swap');
@@ -27,6 +29,9 @@ export const globalCss = `
   input:focus, select:focus, textarea:focus { outline: none; border-color: ${accent}; }
   .spin { animation: rot .8s linear infinite; }
   @keyframes rot { to { transform: rotate(360deg); } }
+  /* Horizontal scroll container for wide tables/grids: phones swipe sideways
+     instead of breaking the layout; a no-op when the content already fits. */
+  .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   @media (max-width: 720px) {
     .shell { flex-direction: column; }
     .side { width: 100% !important; height: auto !important; position: static !important; flex-direction: row !important; align-items: center; overflow-x: auto; border-right: none !important; border-bottom: ${BD} !important; }
@@ -40,6 +45,8 @@ export const globalCss = `
     body * { visibility: hidden; }
     .ga-print, .ga-print * { visibility: visible; }
     .ga-print { position: absolute; left: 0; top: 0; width: 100%; padding: 0 6px; box-shadow: none !important; border: none !important; }
+    .scroll-x { overflow: visible !important; }
+    .scroll-x > table { min-width: 0 !important; }
     .no-print { display: none !important; }
     .print-only { display: block !important; }
     @page { margin: 14mm; }

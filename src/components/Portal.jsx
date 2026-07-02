@@ -173,8 +173,8 @@ export default function Portal({ token }) {
             <div style={h2}>Scope delivered</div>
             <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
               {scope.map((r) => (
-                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #f0ece2", fontSize: 13 }}>
-                  <span style={{ flex: 1, fontWeight: 700 }}>{typeLabel(r.type)}</span>
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #f0ece2", fontSize: 13, flexWrap: "wrap" }}>
+                  <span style={{ flex: 1, minWidth: 110, fontWeight: 700 }}>{typeLabel(r.type)}</span>
                   <span style={{ ...muted, fontSize: 12.5 }}>{r.delivered} / {r.included}</span>
                   <span style={{ fontWeight: 800, minWidth: 92, textAlign: "right", color: r.state === "over" ? "#c0392b" : r.state === "complete" ? "#1f9d57" : "#6b6580" }}>
                     {r.state === "over" ? `Over +${r.delta}` : r.state === "complete" ? "Complete" : `${Math.max(0, -r.delta)} to go`}

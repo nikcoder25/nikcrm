@@ -133,7 +133,8 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
             {ks.total} tracked · <b>{ks.top10}</b> in top 10 · avg rank <b>{ks.avg == null ? "—" : `#${ks.avg}`}</b> · <span style={{ color: netColor }}>{netLabel}</span>
           </div>
           {keywords.length === 0 ? <Empty>No keywords tracked for this client.</Empty> : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <div className="scroll-x">
+            <table style={{ width: "100%", minWidth: 440, borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: "left", borderBottom: BDt }}>
                   <th style={{ padding: "6px 8px" }}>Keyword</th>
@@ -156,6 +157,7 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
 
@@ -169,7 +171,8 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
               {" · "}Avg position <b>{gscMonth.position.toFixed(1)}</b>{gscPrev ? ` (prev ${gscPrev.position.toFixed(1)})` : ""}
             </div>
             {gscQueries.length > 0 && (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <div className="scroll-x">
+              <table style={{ width: "100%", minWidth: 440, borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ textAlign: "left", borderBottom: BDt }}>
                     <th style={{ padding: "6px 8px" }}>Top queries</th>
@@ -189,6 +192,7 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         )}
@@ -200,7 +204,8 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
             <div style={{ fontSize: 12.5, fontWeight: 700, color: "#4b4560", marginBottom: 10 }}>
               <b>{placedLinks.length}</b> backlink{placedLinks.length === 1 ? "" : "s"} placed in {ymLabel(month)}
             </div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <div className="scroll-x">
+            <table style={{ width: "100%", minWidth: 400, borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: "left", borderBottom: BDt }}>
                   <th style={{ padding: "6px 8px" }}>URL</th>
@@ -218,6 +223,7 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 
@@ -259,8 +265,8 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
             <div style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", marginBottom: 8 }}>Scope delivered</div>
             <div style={{ border: BDt, borderRadius: 8, overflow: "hidden" }}>
               {scope.map((r) => (
-                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f0ece2", fontSize: 13 }}>
-                  <span style={{ flex: 1, fontWeight: 700 }}>{typeLabel(r.type)}</span>
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f0ece2", fontSize: 13, flexWrap: "wrap" }}>
+                  <span style={{ flex: 1, minWidth: 110, fontWeight: 700 }}>{typeLabel(r.type)}</span>
                   <span style={{ color: "#6b6580", fontWeight: 700 }}>{r.delivered} / {r.included}</span>
                   <span style={{ fontWeight: 800, minWidth: 92, textAlign: "right", color: r.state === "over" ? "#c0392b" : r.state === "complete" ? "#1f9d57" : "#6b6580" }}>
                     {r.state === "over" ? `Over +${r.delta}` : r.state === "complete" ? "Complete" : `${Math.max(0, -r.delta)} to go`}

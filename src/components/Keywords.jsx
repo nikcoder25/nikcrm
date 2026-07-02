@@ -173,7 +173,7 @@ function RankHistoryPanel({ keyword, points, width = 620, height = 190 }) {
           Not enough rank points in this window — zoom out, or wait for more checks.
         </div>
       ) : (
-        <div style={{ overflowX: "auto" }}><RankChart points={visible} width={width} height={height} dots axes /></div>
+        <div className="scroll-x"><RankChart points={visible} width={width} height={height} dots axes /></div>
       )}
     </div>
   );
@@ -203,7 +203,7 @@ function KeywordHistoryModal({ keyword, points, onClose }) {
   const pts = useFullHistory(keyword, points).filter((p) => p.rank != null);
   return (
     <div style={overlay} onClick={(e) => { e.stopPropagation(); onClose(); }}>
-      <div style={{ ...modal, maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ ...modal, maxWidth: "min(620px, calc(100vw - 32px))" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: disp, fontSize: 18, marginBottom: 14 }}>
           <span>Rank history</span>
           <button style={iconBtn} onClick={onClose}><X size={18} /></button>
@@ -463,7 +463,7 @@ function KeywordTable({ items, byKw, period, onEdit, onDelete, onStar, onBulkDel
         </div>
         <BulkActions ids={checkedVisible} onStar={onStar} onBulkDelete={onBulkDelete} onDone={() => setChecked(new Set())} />
       </div>
-      <div style={{ overflowX: "auto" }}>
+      <div className="scroll-x">
         <div style={{ minWidth: 950 }}>
           <div style={{ display: "grid", gridTemplateColumns: KW_GRID, gap: 8, alignItems: "center", padding: "8px 20px", borderBottom: "2px solid #f0ece2" }}>
             <input type="checkbox" style={cbStyle} checked={allChecked} onChange={toggleAll} title="Select all visible" />
@@ -623,7 +623,7 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
         <Panel><Empty>No URLs match "{urlFilter}".</Empty></Panel>
       ) : (
         <Panel>
-          <div style={{ overflowX: "auto" }}>
+          <div className="scroll-x">
           <div style={{ minWidth: 660 }}>
           <div style={{ display: "grid", gridTemplateColumns: GROUP_GRID, gap: 10, alignItems: "center", padding: "12px 20px", borderBottom: BD }}>
             <span style={th}>URL / Client</span>

@@ -67,7 +67,7 @@ export default function Revenue({ clients, payments, month, setMonth, onSet }) {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         <button style={btn("#fff", ink)} disabled={payments.length === 0} onClick={() => downloadCsv("payments.csv", paymentsCsv(payments, clients))}>
           <Download size={15} /> Export CSV
         </button>
@@ -99,8 +99,8 @@ export default function Revenue({ clients, payments, month, setMonth, onSet }) {
         <div style={{ padding: "16px 20px", fontFamily: disp, fontSize: 15, textTransform: "uppercase", borderBottom: BD }}>Payments · {ymLabel(month)}</div>
         {linkErr && <div style={{ background: tint, border: BDt, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, margin: "12px 20px 0" }}>{linkErr}</div>}
         {active.length === 0 ? <Empty>No active clients.</Empty> : monthPays.map(({ client, status, linkUrl }) => (
-          <div key={client.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", borderBottom: "2px solid #f0ece2" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
+          <div key={client.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", borderBottom: "2px solid #f0ece2", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 140 }}>
               <div style={{ fontWeight: 800, fontSize: 14.5 }}>{client.name}</div>
               <div style={{ fontSize: 12.5, color: "#6b6580", fontWeight: 600 }}>{client.source} · {money(client.fee)}/mo</div>
             </div>

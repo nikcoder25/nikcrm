@@ -85,7 +85,7 @@ export default function Backlinks({ clients, backlinks, onCreate, onUpdate, onDe
                   </span>
                   <button style={iconBtn} title="Add for this client" onClick={() => openAdd(client.id)}><Plus size={15} /></button>
                 </div>
-                <div style={{ overflowX: "auto" }}>
+                <div className="scroll-x">
                   <div style={{ minWidth: 860 }}>
                     <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 10, alignItems: "center", padding: "9px 20px", borderBottom: "2px solid #f0ece2" }}>
                       <span style={th}>URL</span>
