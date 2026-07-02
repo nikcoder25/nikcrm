@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { accent, disp, BD, BDt, SH } from "../lib/theme";
+import { isTaskClosed } from "../lib/constants";
 import { Panel, Empty } from "./ui";
 
 /* ---------------- Team ---------------- */
@@ -15,8 +16,8 @@ export default function Team({ clients, tasks }) {
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(225px,1fr))", gap: 16 }}>
       {members.map((m) => {
         const active = clients.filter((c) => c.team_member === m && c.status === "active").length;
-        const open = tasks.filter((t) => t.assignee === m && (t.status || "todo") !== "done").length;
-        const done = tasks.filter((t) => t.assignee === m && t.status === "done").length;
+        const open = tasks.filter((t) => t.assignee === m && !isTaskClosed(t)).length;
+        const done = tasks.filter((t) => t.assignee === m && isTaskClosed(t)).length;
         return (
           <div key={m} style={{ background: "#fff", border: BD, borderRadius: 16, padding: 20, boxShadow: SH }}>
             <div style={{ width: 46, height: 46, borderRadius: 12, background: accent, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: disp, fontSize: 19, border: BDt, marginBottom: 12 }}>{m.charAt(0).toUpperCase()}</div>

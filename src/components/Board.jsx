@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Plus, X, Filter } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, SH, SHs, sel, btn, moveBtn } from "../lib/theme";
-import { TASK_TYPES, TASK_STATES, typeLabel } from "../lib/constants";
+import { TASK_TYPES, TASK_STATES, typeLabel, isTaskClosed } from "../lib/constants";
 import { isPastDue } from "../lib/format";
 
 /* ---------------- Task Board ---------------- */
@@ -53,10 +53,10 @@ export default function Board({ clients, tasks, onAdd, onMove, onDelete }) {
           </span>
         )}
       </div>
-      <div className="board" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16 }}>
+      <div className="board" style={{ display: "grid", gridTemplateColumns: `repeat(${TASK_STATES.length},1fr)`, gap: 16 }}>
         {TASK_STATES.map((col) => {
           const items = visible.filter((t) => (t.status || "todo") === col.key);
-          const bg = col.key === "todo" ? "#f0ece2" : col.key === "doing" ? tint : "#ded7f5";
+          const bg = col.key === "todo" ? "#f0ece2" : col.key === "doing" ? tint : col.key === "delivered" ? "#d7f5df" : "#ded7f5";
           const idx = TASK_STATES.findIndex((s) => s.key === col.key);
           return (
             <div key={col.key} style={{ background: bg, border: BD, borderRadius: 16, padding: 14, minHeight: 180, boxShadow: SH }}>
@@ -75,13 +75,13 @@ export default function Board({ clients, tasks, onAdd, onMove, onDelete }) {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
                     <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, padding: "3px 9px", borderRadius: 6, border: "2px solid " + ink }}>{t.assignee || "Unassigned"}</span>
                     {t.due && (() => {
-                      const overdue = isPastDue(t.due) && (t.status || "todo") !== "done";
+                      const overdue = isPastDue(t.due) && !isTaskClosed(t);
                       return <span style={{ fontSize: 11, color: overdue ? "#c0392b" : "#6b6580", fontWeight: overdue ? 800 : 700 }}>{overdue ? "⚠ " : ""}{t.due}</span>;
                     })()}
                   </div>
                   <div style={{ display: "flex", gap: 7, marginTop: 12, borderTop: "2px solid #eee", paddingTop: 11 }}>
                     {idx > 0 && <button style={moveBtn(false)} onClick={() => onMove(t.id, TASK_STATES[idx - 1].key)}>‹ {TASK_STATES[idx - 1].label}</button>}
-                    {idx < 2 && <button style={moveBtn(true)} onClick={() => onMove(t.id, TASK_STATES[idx + 1].key)}>{TASK_STATES[idx + 1].label} ›</button>}
+                    {idx < TASK_STATES.length - 1 && <button style={moveBtn(true)} onClick={() => onMove(t.id, TASK_STATES[idx + 1].key)}>{TASK_STATES[idx + 1].label} ›</button>}
                   </div>
                 </div>
               ))}
