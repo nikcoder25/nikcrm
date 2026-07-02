@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { Plug, Check, RefreshCw, Calendar, Mail, Loader } from "lucide-react";
+import { Plug, Check, RefreshCw, Calendar, Mail, Loader, DatabaseBackup } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, btn } from "../lib/theme";
 import { googleStatus, googleAuthUrl, googleDisconnect } from "../lib/google";
+import { backupExport } from "../lib/api";
+import { todayStr } from "../lib/format";
 import { useToast } from "../lib/toast";
 import { Panel, Center } from "./ui";
 
-// Workspace settings: currently the Google (Gmail + Calendar) connection.
-// Connecting is admin-only; everyone can see the status. The tokens live
-// server-side — this screen only reflects connection state.
+// Workspace settings: the Google (Gmail + Calendar) connection and the
+// admin-only full-database backup download. Google tokens live server-side —
+// this screen only reflects connection state.
 export default function Settings({ isAdmin, name, onConnected }) {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -31,6 +33,28 @@ export default function Settings({ isAdmin, name, onConnected }) {
     try { await googleDisconnect(); await refresh(); toast("Google disconnected"); }
     catch (e) { toast(e?.message || "Could not disconnect.", "error"); }
     setBusy(false);
+  };
+
+  // Fetch the full export and hand it to the browser as a dated JSON download.
+  const [backupBusy, setBackupBusy] = useState(false);
+  const downloadBackup = async () => {
+    setBackupBusy(true);
+    try {
+      const data = await backupExport();
+      const blob = new Blob([JSON.stringify(data, null, 1)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `growth-atlas-backup-${todayStr()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast("Backup downloaded");
+    } catch (e) {
+      toast(e?.message || "Backup failed.", "error");
+    }
+    setBackupBusy(false);
   };
 
   if (loading) return <Center>Loading settings…</Center>;
@@ -98,6 +122,32 @@ export default function Settings({ isAdmin, name, onConnected }) {
 
       <div style={{ marginTop: 14, fontSize: 12, color: "#6b6580", fontWeight: 600, lineHeight: 1.5 }}>
         Access is limited to the scopes shown on Google's consent screen (read-only Gmail and Calendar events). Tokens are stored server-side and never sent to the browser. Disconnecting removes them.
+      </div>
+
+      <div style={{ marginTop: 18 }}>
+      <Panel>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 20px", borderBottom: BD }}>
+          <DatabaseBackup size={17} />
+          <h2 style={{ fontFamily: disp, fontSize: 15, textTransform: "uppercase" }}>Backup</h2>
+        </div>
+        <div style={{ padding: 20 }}>
+          <p style={{ fontSize: 13.5, fontWeight: 600, color: "#4b4560", lineHeight: 1.5, marginBottom: 14 }}>
+            Download the entire database — clients, tasks, payments, deliverables, keywords &amp; rank history,
+            backlinks, AI visibility, reports, retainers, team, activity — as one JSON file you keep. Do it on a
+            schedule that matches how much work you'd be willing to re-enter (weekly is a good default).
+            Uploaded files aren't included (their list is; re-upload from your originals), and no passwords or
+            connection secrets ever leave the server.
+          </p>
+          {isAdmin ? (
+            <button style={{ ...btn(accent, "#fff") }} disabled={backupBusy} onClick={downloadBackup}>
+              {backupBusy ? <Loader size={15} className="spin" /> : <DatabaseBackup size={15} />}
+              {backupBusy ? "Preparing…" : "Download backup"}
+            </button>
+          ) : (
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#6b6580" }}>Only an admin can download a backup.</div>
+          )}
+        </div>
+      </Panel>
       </div>
     </div>
   );
