@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Plus, X } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import { Plus, X, Filter } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, SH, SHs, sel, btn, moveBtn } from "../lib/theme";
 import { TASK_TYPES, TASK_STATES, typeLabel } from "../lib/constants";
 import { isPastDue } from "../lib/format";
@@ -8,15 +8,22 @@ import { isPastDue } from "../lib/format";
 export default function Board({ clients, tasks, onAdd, onMove, onDelete }) {
   const wp = clients.filter((c) => c.status !== "ended" && c.status !== "loss");
   const [f, setF] = useState({ client_id: "", title: "", type: "guest", assignee: "", due: "" });
+  const [filterClient, setFilterClient] = useState("");
+  const [filterAssignee, setFilterAssignee] = useState("");
   const nameOf = (id) => (clients.find((c) => c.id === id)?.name) || "";
   const add = () => {
     if (!f.client_id || !f.title.trim()) return;
     onAdd({ client_id: f.client_id, title: f.title, type: f.type, assignee: f.assignee, status: "todo", due: f.due || null });
     setF({ ...f, title: "", assignee: "", due: "" });
   };
+  const assignees = useMemo(() => [...new Set(tasks.map((t) => t.assignee).filter(Boolean))].sort(), [tasks]);
+  const visible = useMemo(() => tasks.filter((t) =>
+    (!filterClient || t.client_id === filterClient) &&
+    (!filterAssignee || t.assignee === filterAssignee)
+  ), [tasks, filterClient, filterAssignee]);
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", background: "#fff", border: BD, borderRadius: 14, padding: 14, boxShadow: SH, marginBottom: 20 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", background: "#fff", border: BD, borderRadius: 14, padding: 14, boxShadow: SH, marginBottom: 12 }}>
         <select style={sel} value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })}>
           <option value="">Client...</option>
           {wp.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -29,9 +36,26 @@ export default function Board({ clients, tasks, onAdd, onMove, onDelete }) {
         <input type="date" style={sel} value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} />
         <button style={btn(accent, "#fff")} onClick={add}><Plus size={16} /> Add</button>
       </div>
+      {/* Board filters — essential once you're juggling dozens of clients */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 18 }}>
+        <Filter size={15} style={{ color: "#6b6580" }} />
+        <select style={{ ...sel, flex: "none", minWidth: 160 }} value={filterClient} onChange={(e) => setFilterClient(e.target.value)}>
+          <option value="">All clients</option>
+          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <select style={{ ...sel, flex: "none", minWidth: 140 }} value={filterAssignee} onChange={(e) => setFilterAssignee(e.target.value)}>
+          <option value="">All assignees</option>
+          {assignees.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        {(filterClient || filterAssignee) && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#6b6580" }}>
+            {visible.length} of {tasks.length} tasks
+          </span>
+        )}
+      </div>
       <div className="board" style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16 }}>
         {TASK_STATES.map((col) => {
-          const items = tasks.filter((t) => (t.status || "todo") === col.key);
+          const items = visible.filter((t) => (t.status || "todo") === col.key);
           const bg = col.key === "todo" ? "#f0ece2" : col.key === "doing" ? tint : "#ded7f5";
           const idx = TASK_STATES.findIndex((s) => s.key === col.key);
           return (

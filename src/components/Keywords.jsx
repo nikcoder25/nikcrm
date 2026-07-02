@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Plus, Pencil, Trash2, X, ArrowUp, ArrowDown, Minus, ExternalLink, Search, Target, Download } from "lucide-react";
-import { ink, accent, tint, disp, BD, BDt, btn, iconBtn, overlay, modal, lbl, input } from "../lib/theme";
+import { ink, accent, tint, disp, BD, BDt, btn, iconBtn, sel, overlay, modal, lbl, input } from "../lib/theme";
 import { downloadCsv, keywordsCsv } from "../lib/csv";
 import { Panel, Empty, Field, Row, RevCard } from "./ui";
 
@@ -173,13 +173,16 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [preClient, setPreClient] = useState("");
+  const [filterClient, setFilterClient] = useState("");
 
   const openAdd = (client_id = "") => { setEditing(null); setPreClient(client_id); setShowForm(true); };
   const openEdit = (k) => { setEditing(k); setPreClient(""); setShowForm(true); };
   const close = () => { setShowForm(false); setEditing(null); setPreClient(""); };
 
-  const s = keywordSummary(keywords);
+  const visibleKeywords = filterClient ? keywords.filter((k) => k.client_id === filterClient) : keywords;
+  const s = keywordSummary(visibleKeywords);
   const groups = clients
+    .filter((c) => !filterClient || c.id === filterClient)
     .map((c) => ({ client: c, items: keywords.filter((k) => k.client_id === c.id) }))
     .filter((g) => g.items.length > 0);
 
@@ -191,9 +194,14 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
         <RevCard icon={ArrowUp} label="In top 10" val={String(s.top10)} hint="rank 1–10" />
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 16 }}>
-        <button style={btn("#fff", ink)} disabled={keywords.length === 0} onClick={() => downloadCsv("keywords.csv", keywordsCsv(keywords, clients))}><Download size={15} /> Export CSV</button>
-        <button style={btn(accent, "#fff")} disabled={clients.length === 0} onClick={() => openAdd()}><Plus size={16} /> Add keyword</button>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
+        <select style={{ ...sel, flex: "none", minWidth: 170 }} value={filterClient} onChange={(e) => setFilterClient(e.target.value)}>
+          <option value="">All clients</option>
+          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <span style={{ flex: 1 }} />
+        <button style={btn("#fff", ink)} disabled={visibleKeywords.length === 0} onClick={() => downloadCsv("keywords.csv", keywordsCsv(visibleKeywords, clients))}><Download size={15} /> Export CSV</button>
+        <button style={btn(accent, "#fff")} disabled={clients.length === 0} onClick={() => openAdd(filterClient)}><Plus size={16} /> Add keyword</button>
       </div>
 
       {clients.length === 0 ? (
