@@ -129,6 +129,23 @@ async function ensureSchema(sql) {
     email text default '',
     created_at timestamptz default now()
   )`;
+  // Activity log: a lightweight interaction timeline per client (the CRM
+  // "touchpoints" — calls, emails, meetings, and free-text notes). happened_at
+  // is when the interaction occurred (author-editable); created_at is the row
+  // insert time. This is what turns the ops board into a real CRM.
+  await sql`create table if not exists activities (
+    id uuid primary key default gen_random_uuid(),
+    client_id uuid references clients(id) on delete cascade,
+    type text default 'note',                -- note / call / email / meeting
+    body text default '',
+    author text default '',
+    happened_at timestamptz default now(),
+    follow_up_date date,                      -- optional "next touch" reminder; null once done
+    created_at timestamptz default now()
+  )`;
+  // follow_up_date was added after the first activities release; add it for
+  // installs whose table predates it.
+  await sql`alter table activities add column if not exists follow_up_date date`;
   // Deliverables are attributed to a calendar month so they can be matched to
   // the retainer scope by type + month. Older rows may predate this column.
   await sql`alter table deliverables add column if not exists month text default ''`;
@@ -149,6 +166,8 @@ async function ensureSchema(sql) {
     sql`create index if not exists idx_keywords_client on keywords (client_id)`,
     sql`create index if not exists idx_keyword_history_kw on keyword_history (keyword_id)`,
     sql`create index if not exists idx_keyword_history_time on keyword_history (recorded_at)`,
+    sql`create index if not exists idx_activities_client on activities (client_id)`,
+    sql`create index if not exists idx_activities_time on activities (happened_at)`,
   ]);
   schemaReady = true;
 }
@@ -245,7 +264,7 @@ export default async (req) => {
     await ensureSchema(sql);
     switch (action) {
       case "load": {
-        const [clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, team_members] = await Promise.all([
+        const [clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, team_members, activities] = await Promise.all([
           sql`select * from clients order by created_at desc`,
           sql`select * from tasks order by created_at desc`,
           sql`select * from payments`,
@@ -257,8 +276,9 @@ export default async (req) => {
           sql`select id, client_id, period, summary, updated_at from client_reports`,
           sql`select id, client_id, type, quantity from client_retainers`,
           sql`select id, name, role, email from team_members order by name asc`,
+          sql`select id, client_id, type, body, author, happened_at, follow_up_date from activities order by happened_at desc`,
         ]);
-        return json({ clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, team_members });
+        return json({ clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, team_members, activities });
       }
 
       case "clientSave": {
@@ -504,6 +524,35 @@ export default async (req) => {
         // Not admin-gated — only client deletion is. Removing a member from the
         // roster does NOT unassign anyone: clients/tasks keep the stored name.
         await sql`delete from team_members where id=${payload.id}`;
+        return json({ ok: true });
+      }
+
+      case "activityAdd": {
+        // Log a client touchpoint (note / call / email / meeting). happened_at
+        // defaults to now, but the UI may pass an explicit date/time.
+        const a = payload;
+        if (!a.client_id) return json({ error: "Missing client." }, 400);
+        if (!a.body || !a.body.trim()) return json({ error: "Write something to log." }, 400);
+        const type = ["note", "call", "email", "meeting"].includes(a.type) ? a.type : "note";
+        const happenedAt = a.happened_at ? new Date(a.happened_at).toISOString() : new Date().toISOString();
+        const followUp = a.follow_up_date ? String(a.follow_up_date).slice(0, 10) : null;
+        await sql`insert into activities (client_id, type, body, author, happened_at, follow_up_date)
+          values (${a.client_id}, ${type}, ${a.body.trim()}, ${a.author || ""}, ${happenedAt}, ${followUp})`;
+        return json({ ok: true });
+      }
+
+      case "activityFollowupSet": {
+        // Set or clear (null) the follow-up reminder on an existing activity.
+        const a = payload;
+        if (!a.id) return json({ error: "Missing activity id." }, 400);
+        const followUp = a.follow_up_date ? String(a.follow_up_date).slice(0, 10) : null;
+        await sql`update activities set follow_up_date=${followUp} where id=${a.id}`;
+        return json({ ok: true });
+      }
+
+      case "activityDelete": {
+        // Not admin-gated — only client deletion is.
+        await sql`delete from activities where id=${payload.id}`;
         return json({ ok: true });
       }
 

@@ -8,10 +8,12 @@ import {
   createKeyword, updateKeyword, deleteKeyword,
 } from "../lib/api";
 import { useToast } from "../lib/toast";
-import { Empty } from "./ui";
+import { computeHealth } from "../lib/health";
+import { Empty, HealthBadge } from "./ui";
 import { KeywordRows, KeywordForm, keywordSummary } from "./Keywords";
 import ClientScope from "./ClientScope";
 import ClientReport from "./ClientReport";
+import Activity from "./Activity";
 
 const fmtSize = (n) => {
   const b = Number(n) || 0;
@@ -36,7 +38,8 @@ function Detail({ label, value }) {
   );
 }
 
-export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], retainers = [], isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
+export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], retainers = [], activities = [], payments = [], tasks = [], author = "", isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
+  const health = computeHealth(client, { deliverables, payments, tasks, keywords, activities });
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -96,9 +99,10 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
           <div>
             <h1 style={{ fontFamily: disp, fontSize: 22, lineHeight: 1.1 }}>{client.name}</h1>
-            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ padding: "4px 11px", borderRadius: 7, fontSize: 11, fontWeight: 800, border: BDt, background: client.status === "active" ? accent : "#fff", color: client.status === "active" ? "#fff" : ink }}>{STATUS_LABEL[client.status] || client.status}</span>
               {client.source && <span style={{ padding: "4px 11px", borderRadius: 7, fontSize: 11, fontWeight: 800, border: BDt, background: tint }}>{client.source}</span>}
+              <HealthBadge health={health} />
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -125,7 +129,9 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
           </div>
         </div>
 
-        <div style={{ marginTop: 20 }}>
+        <Activity client={client} activities={activities} author={author} onChanged={onChanged} />
+
+        <div style={{ marginTop: 22, borderTop: "2px solid #f0ece2", paddingTop: 20 }}>
           <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
             <Paperclip size={16} /> Resources & files
           </h2>

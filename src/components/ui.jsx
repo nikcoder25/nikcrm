@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useRef } from "react";
-import { X } from "lucide-react";
+import { X, HeartPulse } from "lucide-react";
 import { ink, accent, disp, BD, BDt, SH, lbl, input, overlay, modal, iconBtn } from "../lib/theme";
+import { HEALTH_BANDS } from "../lib/health";
 
 const errText = { color: "#c0392b", fontSize: 11.5, fontWeight: 700, marginTop: 4 };
 const reqMark = <span aria-hidden="true" style={{ color: "#c0392b" }}> *</span>;
@@ -63,6 +64,26 @@ export function RevCard({ icon: I, label, val, hint, onClick }) {
         <div style={{ fontSize: 12.5, color: "#6b6580", fontWeight: 600 }}>{hint}</div>
       </div>
     </Tag>
+  );
+}
+
+// Client health pill: a colored score badge (0–100) with the band label. An
+// "ended" client scores null and renders a neutral pill. The `reasons` list
+// becomes the hover title so the score is explainable at a glance.
+export function HealthBadge({ health, size = "md" }) {
+  if (!health) return null;
+  const neutral = health.score == null;
+  const band = HEALTH_BANDS[health.band] || null;
+  const fg = neutral ? "#6b6580" : band?.fg || ink;
+  const bg = neutral ? "#eee9dd" : band?.bg || "#fff";
+  const small = size === "sm";
+  const title = health.reasons?.length ? `${health.label}: ${health.reasons.join(" · ")}` : health.label;
+  return (
+    <span title={title} aria-label={`Health: ${health.label}${neutral ? "" : ` (${health.score} of 100)`}`}
+      style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: small ? "2px 8px" : "4px 10px", borderRadius: 7, border: BDt, background: bg, color: fg, fontSize: small ? 11 : 12, fontWeight: 800, whiteSpace: "nowrap" }}>
+      <HeartPulse size={small ? 12 : 14} />
+      {neutral ? health.label : <>{health.score}<span style={{ opacity: 0.7, fontWeight: 700 }}> · {health.label}</span></>}
+    </span>
   );
 }
 
