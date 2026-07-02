@@ -206,6 +206,8 @@ function Detail({ label, value }) {
   );
 }
 
+// onChanged(...sets) asks the Dashboard to re-fetch: pass the dataset names the
+// mutation touched (e.g. "resources") for a narrow refresh, no args for a full one.
 export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], retainers = [], isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
@@ -271,7 +273,7 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
     guard(async () => {
       await addResourceLink(client.id, linkLabel.trim(), linkUrl.trim());
       setLinkLabel(""); setLinkUrl("");
-      onChanged();
+      onChanged("resources");
     });
   };
 
@@ -280,7 +282,7 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
     if (fileRef.current) fileRef.current.value = ""; // allow re-picking the same file
     if (!file) return;
     if (file.size > MAX_FILE_BYTES) { setErr("File too large (max 4 MB)."); return; }
-    guard(async () => { await uploadResourceFile(client.id, file); onChanged(); });
+    guard(async () => { await uploadResourceFile(client.id, file); onChanged("resources"); });
   };
 
   const openFile = (r) => guard(async () => {
@@ -290,17 +292,17 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
 
   const removeResource = (id) => {
     if (!window.confirm("Remove this resource? Uploaded files are deleted permanently.")) return;
-    guard(async () => { await deleteResource(id); onChanged(); });
+    guard(async () => { await deleteResource(id); onChanged("resources"); });
   };
 
   const saveKeyword = (k) => guard(async () => {
     await (k.id ? updateKeyword(k) : createKeyword(k));
     setKwForm(false); setKwEditing(null);
-    onChanged();
+    onChanged("keywords", "keyword_history");
   });
   const removeKeyword = (id) => {
     if (!window.confirm("Delete this keyword and its rank history?")) return;
-    guard(async () => { await deleteKeyword(id); onChanged(); });
+    guard(async () => { await deleteKeyword(id); onChanged("keywords", "keyword_history"); });
   };
 
   const kstats = keywordSummary(keywords);

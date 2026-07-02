@@ -43,6 +43,9 @@ export async function login(name, password) {
 }
 
 export const load = () => call("load");
+// Per-entity refresh: fetch only the named datasets (e.g. ["tasks"]) instead
+// of the whole database. Same row shapes as `load`, keyed by dataset name.
+export const loadSome = (sets) => call("loadSome", { sets });
 export const saveClient = (c) => call("clientSave", c);
 export const deleteClient = (id) => call("clientDelete", { id });
 export const addTask = (t) => call("taskAdd", t);
@@ -100,6 +103,9 @@ export async function fetchFileObjectUrl(blobKey) {
 export const createDeliverable = (d) => call("deliverableCreate", d);
 export const updateDeliverable = (d) => call("deliverableUpdate", d);
 export const deleteDeliverable = (id) => call("deliverableDelete", { id });
+// Top up a month's deliverables to the retainer scope. Payload is either
+// { client_id, month } or { all: true, month }; returns { ok, created }.
+export const generateMonthDeliverables = (p) => call("deliverablesGenerateMonth", p);
 
 /* ---------------- keywords (rank tracking) ---------------- */
 export const createKeyword = (k) => call("keywordCreate", k);

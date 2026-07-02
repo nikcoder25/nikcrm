@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { neon } from "@netlify/neon";
 import { getStore } from "@netlify/blobs";
 import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, typeLabel } from "../../src/lib/constants.js";
+import { lastDayOfMonth } from "../../src/lib/format.js";
 
 // Uploaded client files live in a Netlify Blobs store (auto-available to
 // functions — no setup). The DB "resources" table holds the metadata + blob key.
@@ -207,6 +208,33 @@ async function ensureSchema(sql) {
     sql`create index if not exists idx_activity_time on activity (created_at desc)`,
   ]);
   schemaReady = true;
+}
+
+// One query per dataset, shared by `load` (which returns all of them) and
+// `loadSome` (only the requested ones) so both always return identical shapes.
+const DATASET_QUERIES = {
+  clients: (sql) => sql`select * from clients order by created_at desc`,
+  tasks: (sql) => sql`select * from tasks order by created_at desc`,
+  payments: (sql) => sql`select * from payments`,
+  resources: (sql) => sql`select id, client_id, kind, label, url, blob_key, filename, content_type, size, created_by, created_at
+    from resources order by created_at desc`,
+  deliverables: (sql) => sql`select * from deliverables order by created_at desc`,
+  keywords: (sql) => sql`select * from keywords order by created_at desc`,
+  // keyword_history is unbounded; only ship the last 25 points per keyword.
+  // The full series comes from the keywordHistory action.
+  keyword_history: (sql) => sql`select id, keyword_id, rank, recorded_at from
+    (select h.*, row_number() over (partition by keyword_id order by recorded_at desc) rn from keyword_history h) t
+    where rn <= 25 order by recorded_at asc`,
+  client_reports: (sql) => sql`select id, client_id, period, summary, updated_at from client_reports`,
+  client_retainers: (sql) => sql`select id, client_id, type, quantity from client_retainers`,
+  activity: (sql) => sql`select id, actor, verb, entity, entity_label, client_id, detail, created_at
+    from activity order by created_at desc limit 100`,
+};
+
+// Fetch the named datasets in parallel → { name: rows, ... }.
+async function loadDatasets(sql, names) {
+  const results = await Promise.all(names.map((n) => DATASET_QUERIES[n](sql)));
+  return Object.fromEntries(names.map((n, i) => [n, results[i]]));
 }
 
 // Best-effort audit write — a logging failure must never fail the action itself.
@@ -467,25 +495,17 @@ export default async (req) => {
     await ensureSchema(sql);
     switch (action) {
       case "load": {
-        const [clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, activity] = await Promise.all([
-          sql`select * from clients order by created_at desc`,
-          sql`select * from tasks order by created_at desc`,
-          sql`select * from payments`,
-          sql`select id, client_id, kind, label, url, blob_key, filename, content_type, size, created_by, created_at
-              from resources order by created_at desc`,
-          sql`select * from deliverables order by created_at desc`,
-          sql`select * from keywords order by created_at desc`,
-          // keyword_history is unbounded; only ship the last 25 points per
-          // keyword. The full series comes from the keywordHistory action.
-          sql`select id, keyword_id, rank, recorded_at from
-              (select h.*, row_number() over (partition by keyword_id order by recorded_at desc) rn from keyword_history h) t
-              where rn <= 25 order by recorded_at asc`,
-          sql`select id, client_id, period, summary, updated_at from client_reports`,
-          sql`select id, client_id, type, quantity from client_retainers`,
-          sql`select id, actor, verb, entity, entity_label, client_id, detail, created_at
-              from activity order by created_at desc limit 100`,
-        ]);
-        return json({ clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, activity });
+        return json(await loadDatasets(sql, Object.keys(DATASET_QUERIES)));
+      }
+
+      case "loadSome": {
+        // Per-entity refresh: fetch only the datasets a mutation touched
+        // instead of re-reading the whole database after every change.
+        const sets = Array.isArray(payload.sets) ? payload.sets : [];
+        if (!sets.length) return json({ error: "No datasets requested." }, 400);
+        const unknown = sets.find((s) => !Object.hasOwn(DATASET_QUERIES, s));
+        if (unknown !== undefined) return json({ error: `Unknown dataset: ${unknown}` }, 400);
+        return json(await loadDatasets(sql, sets));
       }
 
       case "keywordHistory": {
@@ -724,6 +744,47 @@ export default async (req) => {
         await sql`delete from deliverables where id=${payload.id}`;
         if (del.length) await logActivity(sql, { actor, verb: "deleted deliverable", entity: "deliverable", entity_label: del[0].title || typeLabel(del[0].type), client_id: del[0].client_id });
         return json({ ok: true });
+      }
+
+      case "deliverablesGenerateMonth": {
+        // Recurring monthly deliverables: for each retainer line, top up the
+        // month to the agreed quantity with 'planned' items due on its last
+        // day. Idempotent — anything already due in the month (generated or
+        // hand-made) counts toward the quota, so re-running only creates the
+        // shortfall. Either one client (client_id) or every active client
+        // that has retainer lines (all: true).
+        const month = String(payload.month || "").trim();
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return json({ error: "Month must look like 2026-07." }, 400);
+        const lines = payload.client_id
+          ? await sql`select client_id, type, quantity from client_retainers where client_id=${payload.client_id}`
+          : payload.all
+            ? await sql`select r.client_id, r.type, r.quantity from client_retainers r
+                join clients c on c.id = r.client_id where c.status = 'active'`
+            : null;
+        if (!lines) return json({ error: "Missing client (or pass all: true)." }, 400);
+        const due = lastDayOfMonth(month);
+        let created = 0;
+        for (const line of lines) {
+          const included = Number(line.quantity) || 0;
+          if (included <= 0) continue;
+          const [{ n }] = await sql`select count(*)::int as n from deliverables
+            where client_id=${line.client_id} and type=${line.type}
+              and to_char(due_date, 'YYYY-MM') = ${month}`;
+          for (let i = n; i < included; i++) {
+            await sql`insert into deliverables (client_id, title, type, status, quantity, due_date)
+              values (${line.client_id}, ${`${typeLabel(line.type)} ${i + 1}/${included} — ${month}`},
+                      ${line.type}, 'planned', 1, ${due})`;
+            created += 1;
+          }
+        }
+        if (created > 0) {
+          await logActivity(sql, {
+            actor, verb: "generated", entity: "deliverables",
+            entity_label: `${created} deliverable${created === 1 ? "" : "s"} for ${month}`,
+            client_id: payload.client_id || null, detail: "from retainer scope",
+          });
+        }
+        return json({ ok: true, created });
       }
 
       case "keywordCreate": {

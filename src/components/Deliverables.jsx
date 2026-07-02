@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Plus, Pencil, Trash2, X, Download } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Download, CalendarPlus } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, SH, SHs, btn, iconBtn, sel, overlay, modal, lbl, input } from "../lib/theme";
 import { TASK_TYPES, typeLabel, DELIVERABLE_STATES } from "../lib/constants";
 import { isPastDue } from "../lib/format";
@@ -10,15 +10,29 @@ const STATUS_BG = { planned: "#f0ece2", in_progress: tint, delivered: "#d7f5df",
 const isOverdue = (d) => isPastDue(d.due_date) && d.status !== "delivered";
 
 /* ---------------- Deliverables ---------------- */
-export default function Deliverables({ clients, deliverables, onCreate, onUpdate, onDelete }) {
+export default function Deliverables({ clients, deliverables, onCreate, onUpdate, onDelete, onGenerate }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [preClient, setPreClient] = useState("");
   const [filterClient, setFilterClient] = useState("");
+  const [genBusy, setGenBusy] = useState(false);
+  const [genMsg, setGenMsg] = useState("");
 
   const openAdd = (client_id = "") => { setEditing(null); setPreClient(client_id); setShowForm(true); };
   const openEdit = (d) => { setEditing(d); setPreClient(""); setShowForm(true); };
   const close = () => { setShowForm(false); setEditing(null); setPreClient(""); };
+
+  // Top up this month to every active client's retainer scope. onGenerate
+  // (wired in Dashboard) returns { created } on success, undefined on failure
+  // (the Dashboard error banner reports the failure itself).
+  const generate = async () => {
+    setGenMsg(""); setGenBusy(true);
+    const r = await onGenerate();
+    setGenBusy(false);
+    if (r) setGenMsg(r.created > 0
+      ? `Created ${r.created} deliverable${r.created === 1 ? "" : "s"} from retainer scopes`
+      : "Nothing to create — this month already matches every retainer scope");
+  };
 
   const withDeliverables = clients
     .filter((c) => !filterClient || c.id === filterClient)
@@ -33,6 +47,10 @@ export default function Deliverables({ clients, deliverables, onCreate, onUpdate
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <span style={{ flex: 1 }} />
+        {genMsg && <span style={{ fontSize: 12, fontWeight: 700, color: "#1f9d57" }}>{genMsg}</span>}
+        <button style={btn("#fff", ink)} disabled={genBusy || clients.length === 0} title="Create the missing deliverables for this month from every active client's retainer scope" onClick={generate}>
+          <CalendarPlus size={15} /> {genBusy ? "Generating…" : "Generate this month"}
+        </button>
         <button style={btn("#fff", ink)} disabled={deliverables.length === 0} onClick={() => downloadCsv("deliverables.csv", deliverablesCsv(deliverables, clients))}>
           <Download size={15} /> Export CSV
         </button>

@@ -54,22 +54,40 @@ export default function Dashboard({ session, onSignOut }) {
     setError(e?.message || fallback);
   };
 
+  // Dataset name (as the API returns it) → state slice setter. Used by both
+  // the full refresh and the per-entity refresh so they can't drift apart.
+  const SETTERS = {
+    clients: setClients,
+    tasks: setTasks,
+    payments: setPayments,
+    resources: setResources,
+    deliverables: setDeliverables,
+    keywords: setKeywords,
+    keyword_history: setKeywordHistory,
+    client_reports: setReports,
+    client_retainers: setRetainers,
+    activity: setActivity,
+  };
+
   // Fetch fresh data WITHOUT toggling the loading flag, so refreshes after a
   // mutation don't unmount the whole screen into a "Loading…" flash. The
   // full-screen loader is reserved for the very first load.
   const refresh = async () => {
     try {
-      const { clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, activity } = await api.load();
-      setClients(clients || []);
-      setTasks(tasks || []);
-      setPayments(payments || []);
-      setResources(resources || []);
-      setDeliverables(deliverables || []);
-      setKeywords(keywords || []);
-      setKeywordHistory(keyword_history || []);
-      setReports(client_reports || []);
-      setRetainers(client_retainers || []);
-      setActivity(activity || []);
+      const data = await api.load();
+      for (const key of Object.keys(SETTERS)) SETTERS[key](data[key] || []);
+    } catch (e) {
+      handleErr(e, "Could not reach the database.");
+    }
+  };
+
+  // Per-entity refresh: after a mutation, re-fetch only the datasets it
+  // touched (e.g. ["tasks"]) instead of the whole database. The 60s background
+  // sync still does a full refresh, so the other slices never go stale.
+  const refreshSome = async (sets) => {
+    try {
+      const data = await api.loadSome(sets);
+      for (const key of sets) SETTERS[key]?.(data[key] || []);
     } catch (e) {
       handleErr(e, "Could not reach the database.");
     }
@@ -87,13 +105,15 @@ export default function Dashboard({ session, onSignOut }) {
   }, []);
 
   // Wrap each mutation so a failure surfaces instead of silently doing nothing.
-  // The follow-up refresh happens in place (no loading flash). On failure we
-  // also refresh, so any optimistic local change rolls back to server truth.
-  // Returns the API result (undefined on failure) so callers like the bulk-add
-  // modal can report success counts.
-  const run = async (fn) => {
+  // The follow-up refresh happens in place (no loading flash): pass `sets` with
+  // the datasets the mutation touches for a narrow re-fetch, or omit it for a
+  // full refresh (client save/delete cascade too widely to enumerate). On
+  // failure we always do a FULL refresh, so any optimistic local change rolls
+  // back to server truth. Returns the API result (undefined on failure) so
+  // callers like the bulk-add modal can report success counts.
+  const run = async (fn, sets) => {
     setError("");
-    try { const result = await fn(); await refresh(); return result; }
+    try { const result = await fn(); await (sets ? refreshSome(sets) : refresh()); return result; }
     catch (e) {
       handleErr(e, "Something went wrong.");
       if (e?.status !== 401) await refresh();
@@ -110,31 +130,33 @@ export default function Dashboard({ session, onSignOut }) {
     if (!window.confirm(`Delete client "${c?.name || "this client"}"? All their tasks, payments, keywords, deliverables and files go with them. This cannot be undone.`)) return;
     run(async () => { await api.deleteClient(id); backToClients(); });
   };
-  const addTask = (t) => run(() => api.addTask(t));
-  const delTask = (id) => { if (window.confirm("Delete this task?")) run(() => api.deleteTask(id)); };
-  const createDeliverable = (d) => run(() => api.createDeliverable(d));
-  const delDeliverable = (id) => { if (window.confirm("Delete this deliverable?")) run(() => api.deleteDeliverable(id)); };
-  const createKeyword = (k) => run(() => api.createKeyword(k));
-  const updateKeyword = (k) => run(() => api.updateKeyword(k));
-  const delKeyword = (id) => { if (window.confirm("Delete this keyword and its rank history?")) run(() => api.deleteKeyword(id)); };
-  const bulkAddKeywords = (p) => run(() => api.bulkAddKeywords(p));
+  const addTask = (t) => run(() => api.addTask(t), ["tasks"]);
+  const delTask = (id) => { if (window.confirm("Delete this task?")) run(() => api.deleteTask(id), ["tasks"]); };
+  const createDeliverable = (d) => run(() => api.createDeliverable(d), ["deliverables"]);
+  const delDeliverable = (id) => { if (window.confirm("Delete this deliverable?")) run(() => api.deleteDeliverable(id), ["deliverables"]); };
+  // Top up this month's deliverables to every active client's retainer scope.
+  const generateDeliverables = () => run(() => api.generateMonthDeliverables({ all: true, month: ym(new Date()) }), ["deliverables"]);
+  const createKeyword = (k) => run(() => api.createKeyword(k), ["keywords", "keyword_history"]);
+  const updateKeyword = (k) => run(() => api.updateKeyword(k), ["keywords", "keyword_history"]);
+  const delKeyword = (id) => { if (window.confirm("Delete this keyword and its rank history?")) run(() => api.deleteKeyword(id), ["keywords", "keyword_history"]); };
+  const bulkAddKeywords = (p) => run(() => api.bulkAddKeywords(p), ["keywords", "keyword_history"]);
   // Bulk delete is confirmed inside Keywords.jsx (it knows the selection count).
-  const bulkDeleteKeywords = (ids) => run(() => api.bulkDeleteKeywords(ids));
+  const bulkDeleteKeywords = (ids) => run(() => api.bulkDeleteKeywords(ids), ["keywords", "keyword_history"]);
 
   // High-frequency status changes are applied to local state IMMEDIATELY
   // (optimistic), then synced to the server; the background refresh restores
   // server truth. On failure, handleErr shows the error and refresh resyncs.
   const moveTask = (id, status) => {
     setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status } : t)));
-    run(() => api.moveTask(id, status));
+    run(() => api.moveTask(id, status), ["tasks"]);
   };
   const updateDeliverable = (d) => {
     setDeliverables((ds) => ds.map((x) => (x.id === d.id ? { ...x, ...d } : x)));
-    run(() => api.updateDeliverable(d));
+    run(() => api.updateDeliverable(d), ["deliverables"]);
   };
   const starKeyword = (id, starred) => {
     setKeywords((ks) => ks.map((k) => (k.id === id ? { ...k, starred } : k)));
-    run(() => api.starKeyword(id, starred));
+    run(() => api.starKeyword(id, starred), ["keywords", "keyword_history"]);
   };
   const setPayment = (client_id, month, patch) => {
     setPayments((ps) => {
@@ -142,7 +164,7 @@ export default function Dashboard({ session, onSignOut }) {
       if (i >= 0) { const next = [...ps]; next[i] = { ...next[i], ...patch }; return next; }
       return [...ps, { id: `tmp-${client_id}-${month}`, client_id, month, ...patch }];
     });
-    run(() => api.setPayment(client_id, month, patch));
+    run(() => api.setPayment(client_id, month, patch), ["payments"]);
   };
 
   const NAV = [
@@ -210,7 +232,7 @@ export default function Dashboard({ session, onSignOut }) {
                   onBack={backToClients}
                   onEdit={(c) => { setEditing(c); setShowForm(true); }}
                   onDeleteClient={delClient}
-                  onChanged={refresh}
+                  onChanged={(...sets) => (sets.length ? refreshSome(sets) : refresh())}
                 />
               ) : (
                 <Panel>
@@ -235,7 +257,7 @@ export default function Dashboard({ session, onSignOut }) {
                 tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} activity={activity} /> :
                 tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
                 tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
-                tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} /> :
+                tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} onGenerate={generateDeliverables} /> :
                 tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
                 tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
                 tab === "activity" ? <Activity items={activity} clients={clients} /> :

@@ -2,6 +2,13 @@
 export const money = (n) => "$" + (Number(n) || 0).toLocaleString();
 export const ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 export const ymLabel = (s) => { if (!s) return ""; const [y, m] = s.split("-"); return new Date(y, m - 1, 1).toLocaleString("en", { month: "short", year: "numeric" }); };
+// Last calendar day of a 'YYYY-MM' month as 'YYYY-MM-DD' ('2026-02' → '2026-02-28').
+// UTC throughout so it never shifts across timezones (also used server-side).
+export const lastDayOfMonth = (month) => {
+  const [y, m] = String(month).split("-").map(Number);
+  const d = new Date(Date.UTC(y, m, 0)); // day 0 of the next month = last day of this one
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+};
 
 // Local calendar date as 'YYYY-MM-DD' (lexicographically comparable).
 export const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };

@@ -89,7 +89,7 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
 
   const save = async () => {
     setBusy(true); setMsg("");
-    try { await saveReport(client.id, month, draft); await onChanged(); setMsg("Saved"); }
+    try { await saveReport(client.id, month, draft); await onChanged("client_reports"); setMsg("Saved"); }
     catch (e) { setMsg(e?.message || "Could not save."); }
     setBusy(false);
   };

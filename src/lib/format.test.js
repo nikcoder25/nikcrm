@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { money, ym, ymLabel, todayStr, isPastDue, timeAgo } from "./format.js";
+import { money, ym, ymLabel, todayStr, isPastDue, timeAgo, lastDayOfMonth } from "./format.js";
 
 describe("money", () => {
   it("formats numbers with a dollar sign", () => {
@@ -18,6 +18,18 @@ describe("ym / ymLabel", () => {
   it("labels a month string", () => {
     expect(ymLabel("2026-07")).toBe("Jul 2026");
     expect(ymLabel("")).toBe("");
+  });
+});
+
+describe("lastDayOfMonth", () => {
+  it("returns the month's last day as YYYY-MM-DD", () => {
+    expect(lastDayOfMonth("2026-07")).toBe("2026-07-31");
+    expect(lastDayOfMonth("2026-06")).toBe("2026-06-30");
+    expect(lastDayOfMonth("2026-12")).toBe("2026-12-31");
+  });
+  it("handles February and leap years", () => {
+    expect(lastDayOfMonth("2026-02")).toBe("2026-02-28");
+    expect(lastDayOfMonth("2028-02")).toBe("2028-02-29");
   });
 });
 
