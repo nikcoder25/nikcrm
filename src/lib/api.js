@@ -1,5 +1,9 @@
-// Frontend data layer. Talks to the Netlify Function at /api/data, which owns
-// the Netlify DB (Neon Postgres) connection. Replaces the old Supabase client.
+// Frontend data layer. Talks to the API at /api/data, which owns the Neon
+// Postgres connection. Same-origin by default (Netlify Functions); set
+// VITE_API_BASE at build time to point at an API hosted elsewhere (e.g. a
+// Cloudflare Worker when the static site lives on Hostinger).
+
+export const API_BASE = String(import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 
 const KEY = "ga_session";
 
@@ -22,7 +26,7 @@ export function authHeaders() {
 
 async function call(action, payload) {
   const s = getSession();
-  const res = await fetch("/api/data", {
+  const res = await fetch(`${API_BASE}/api/data`, {
     method: "POST",
     headers: { "content-type": "application/json", ...authHeaders() },
     // _actor = the display name shown in the activity log for this action.
@@ -45,7 +49,7 @@ export async function login(name, password, email) {
   const payload = email
     ? { email: email.trim(), password }
     : { name: (name || "").trim(), password };
-  const res = await fetch("/api/data", {
+  const res = await fetch(`${API_BASE}/api/data`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "login", payload }),
@@ -106,7 +110,7 @@ export async function uploadResourceFile(client_id, file, label) {
 // Download an uploaded file: fetch it with the auth header, then hand back a
 // temporary object URL the browser can open or save.
 export async function fetchFileObjectUrl(blobKey) {
-  const res = await fetch(`/api/data?key=${encodeURIComponent(blobKey)}`, {
+  const res = await fetch(`${API_BASE}/api/data?key=${encodeURIComponent(blobKey)}`, {
     headers: authHeaders(),
   });
   if (!res.ok) {
@@ -174,7 +178,7 @@ export const setPortalTokenEnabled = (client_id, enabled) => call("portalTokenSe
 // Public portal load: the token IS the credential, so no password header —
 // clients open their link without a team session.
 export async function portalLoad(token) {
-  const res = await fetch("/api/data", {
+  const res = await fetch(`${API_BASE}/api/data`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "portalLoad", payload: { token } }),

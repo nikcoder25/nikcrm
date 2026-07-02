@@ -1,13 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
 import { neon } from "@netlify/neon";
 import { newPasswordRecord, verifyPassword, signToken, verifyToken } from "../lib/auth.js";
-import { getStore } from "@netlify/blobs";
+import { fileStore } from "../lib/files.js";
 import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, BACKLINK_STATES, AI_ENGINES, ACTIVITY_TYPES, typeLabel, activityLabel } from "../../src/lib/constants.js";
 import { lastDayOfMonth } from "../../src/lib/format.js";
 
-// Uploaded client files live in a Netlify Blobs store (auto-available to
-// functions — no setup). The DB "resources" table holds the metadata + blob key.
-const FILES_STORE = "client-files";
+// Uploaded client files live in the file_blobs table (see lib/files.js) so the
+// API is host-portable. The "resources" table holds the metadata + blob key.
 const MAX_FILE_BYTES = 4 * 1024 * 1024; // 4 MB — keeps the base64 body under the function limit
 
 // Netlify DB (Neon) connection, created lazily. neon() reads NETLIFY_DATABASE_URL
@@ -278,6 +277,13 @@ async function ensureSchema(sql) {
   await sql`alter table clients add column if not exists email text default ''`;
   await sql`alter table activities add column if not exists google_event_id text default ''`;
   await sql`alter table activities add column if not exists gmail_msg_id text default ''`;
+  // Uploaded file bytes (see lib/files.js) — in-database so the API runs the
+  // same on any host. resources.blob_key points at file_blobs.key.
+  await sql`create table if not exists file_blobs (
+    key text primary key,
+    data bytea not null,
+    created_at timestamptz default now()
+  )`;
   // Postgres does NOT auto-index foreign-key columns. Without these, every
   // per-client lookup and every ON DELETE CASCADE does a full table scan,
   // which degrades linearly as the client count grows. Idempotent, so they
@@ -552,7 +558,7 @@ export default async (req) => {
       await ensureSchema(sql);
       const rows = await sql`select filename, content_type from resources where blob_key=${key} and kind='file' limit 1`;
       if (!rows.length) return json({ error: "File not found" }, 404);
-      const data = await getStore(FILES_STORE).get(key, { type: "arrayBuffer" });
+      const data = await fileStore(sql).get(key);
       if (!data) return json({ error: "File no longer stored" }, 404);
       const safeName = (rows[0].filename || "file").replace(/["\\\r\n]/g, "");
       // Whitelisted types may render inline; everything else (esp. HTML/SVG,
@@ -807,11 +813,12 @@ export default async (req) => {
         if (!isAdmin) return json({ error: "Only an admin can delete clients." }, 403);
         // Name captured BEFORE the delete — it's all the activity log keeps.
         const named = await sql`select name from clients where id=${payload.id} limit 1`;
-        // Remove the client's uploaded blobs first (DB rows cascade, blobs don't).
+        // Remove the client's uploaded file bytes first (resources rows cascade,
+        // file_blobs has no FK so it must be cleaned explicitly).
         const files = await sql`select blob_key from resources
           where client_id=${payload.id} and kind='file' and blob_key <> ''`;
         if (files.length) {
-          const store = getStore(FILES_STORE);
+          const store = fileStore(sql);
           for (const f of files) { try { await store.delete(f.blob_key); } catch { /* best effort */ } }
         }
         await sql`delete from clients where id=${payload.id}`;
@@ -930,7 +937,7 @@ export default async (req) => {
         if (!buffer.length) return json({ error: "Empty file." }, 400);
         if (buffer.length > MAX_FILE_BYTES) return json({ error: "File too large (max 4 MB)." }, 413);
         const key = crypto.randomUUID();
-        await getStore(FILES_STORE).set(key, buffer);
+        await fileStore(sql).set(key, buffer);
         await sql`insert into resources
           (client_id, kind, label, blob_key, filename, content_type, size, created_by)
           values (${r.client_id}, 'file', ${r.label || r.filename || "File"}, ${key},
@@ -943,7 +950,7 @@ export default async (req) => {
       case "resourceDelete": {
         const rows = await sql`select kind, blob_key, label, client_id from resources where id=${payload.id} limit 1`;
         if (rows.length && rows[0].kind === "file" && rows[0].blob_key) {
-          try { await getStore(FILES_STORE).delete(rows[0].blob_key); } catch { /* best effort */ }
+          try { await fileStore(sql).delete(rows[0].blob_key); } catch { /* best effort */ }
         }
         await sql`delete from resources where id=${payload.id}`;
         if (rows.length) await logActivity(sql, { actor, verb: "deleted resource", entity: "resource", entity_label: rows[0].label, client_id: rows[0].client_id });

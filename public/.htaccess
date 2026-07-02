@@ -1,0 +1,25 @@
+# Hostinger / Apache / LiteSpeed config for the static frontend build.
+# (Vite copies this file into dist/, so it ships with every upload. Netlify
+# ignores .htaccess — its SPA fallback lives in netlify.toml.)
+
+# SPA fallback: deep links like /clients/<id> or /portal/<token> are real
+# routes inside the app, not files on disk — serve index.html and let the
+# client-side router take over.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>
+
+# Hashed assets can be cached forever; index.html must always revalidate so a
+# fresh deploy is picked up immediately.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(js|css|woff2?)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  <FilesMatch "index\.html$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>
