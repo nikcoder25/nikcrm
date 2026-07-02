@@ -162,10 +162,10 @@ export default function Dashboard({ session, onSignOut }) {
           <div style={{ flex: 1 }}><div style={{ fontFamily: disp, fontSize: 17, color: "#fff" }}>Growth Atlas</div><div style={{ fontSize: 10.5, color: "#c9bdf0", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>SEO Ops</div></div>
           <button className="mobbar" onClick={() => setSidebarOpen(false)} aria-label="Close menu" style={{ background: "rgba(255,255,255,.12)", border: "none", borderRadius: 8, padding: 6, color: "#fff", cursor: "pointer" }}><X size={18} /></button>
         </div>
-        <nav className="nav" style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
+        <nav className="nav" aria-label="Main navigation" style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
           {NAV.map((n) => {
             const I = n.i, on = tab === n.k && !detailId;
-            return <button key={n.k} className="ni" onClick={() => goTab(n.k)}
+            return <button key={n.k} className="ni" onClick={() => goTab(n.k)} aria-current={on ? "page" : undefined}
               style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", borderRadius: 11, border: on ? BD : "3px solid transparent", background: on ? "#fff" : "transparent", color: on ? ink : "#c9bdf0", fontWeight: on ? 800 : 700, fontSize: 14.5, cursor: "pointer", textAlign: "left", boxShadow: on ? "4px 4px 0 rgba(0,0,0,.4)" : "none" }}>
               <I size={17} /> <span>{n.l}</span>
             </button>;

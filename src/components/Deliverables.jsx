@@ -4,6 +4,7 @@ import { ink, accent, tint, disp, BD, BDt, btn, iconBtn, sel, lbl, input } from 
 import { TASK_TYPES, typeLabel, DELIVERABLE_STATES } from "../lib/constants";
 import { isPastDue, ym, ymLabel } from "../lib/format";
 import { downloadCsv, deliverablesCsv } from "../lib/csv";
+import { deliverableMonth } from "../lib/scope";
 import { useToast } from "../lib/toast";
 import { Panel, Empty, Field, Pick, Row, Modal } from "./ui";
 
@@ -28,7 +29,12 @@ export default function Deliverables({ clients, deliverables, onSave, onStatus, 
 
   const withDeliverables = clients
     .filter((c) => !filterClient || c.id === filterClient)
-    .map((c) => ({ client: c, items: deliverables.filter((d) => d.client_id === c.id && matches(d)) }))
+    .map((c) => ({
+      client: c,
+      items: deliverables
+        .filter((d) => d.client_id === c.id && matches(d))
+        .sort((a, b) => deliverableMonth(b).localeCompare(deliverableMonth(a))),
+    }))
     .filter((g) => g.items.length > 0);
 
   const addBtn = (
@@ -77,6 +83,7 @@ export default function Deliverables({ clients, deliverables, onSave, onStatus, 
                 {items.map((d) => (
                   <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 20px", borderBottom: "2px solid #f0ece2", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 10.5, fontWeight: 800, padding: "4px 9px", borderRadius: 7, border: BDt, textTransform: "uppercase", background: tint }}>{typeLabel(d.type)}</span>
+                    {deliverableMonth(d) && <span title="Counts toward this month's scope" style={{ fontSize: 10.5, fontWeight: 800, padding: "4px 9px", borderRadius: 7, border: BDt, background: "#fff", color: "#6b6580" }}>{ymLabel(deliverableMonth(d))}</span>}
                     <div style={{ flex: 1, minWidth: 140 }}>
                       <div style={{ fontWeight: 800, fontSize: 14 }}>{d.title || typeLabel(d.type)}{Number(d.quantity) > 1 ? ` ×${d.quantity}` : ""}</div>
                       {(d.due_date || d.notes) && (

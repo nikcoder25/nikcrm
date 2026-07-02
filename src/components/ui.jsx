@@ -1,4 +1,4 @@
-import React, { useEffect, useId } from "react";
+import React, { useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
 import { ink, accent, disp, BD, BDt, SH, lbl, input, overlay, modal, iconBtn } from "../lib/theme";
 
@@ -70,14 +70,24 @@ export function RevCard({ icon: I, label, val, hint, onClick }) {
 // the dialog role + a real <h2> title so every modal is consistent + accessible.
 export function Modal({ title, onClose, children, maxWidth = 480 }) {
   const titleId = useId();
+  const ref = useRef(null);
   useEffect(() => {
+    // Move focus into the dialog on open (first field if there is one), and
+    // restore it to whatever was focused before when the dialog closes.
+    const prev = document.activeElement;
+    const el = ref.current;
+    const field = el && el.querySelector("input, select, textarea");
+    (field || el)?.focus();
     const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      if (prev && typeof prev.focus === "function") prev.focus();
+    };
   }, [onClose]);
   return (
     <div style={overlay} onClick={onClose}>
-      <div style={{ ...modal, maxWidth }} onClick={(e) => e.stopPropagation()}
+      <div ref={ref} tabIndex={-1} style={{ ...modal, maxWidth, outline: "none" }} onClick={(e) => e.stopPropagation()}
         role="dialog" aria-modal="true" aria-labelledby={title != null ? titleId : undefined}>
         {title != null && (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 8 }}>
@@ -88,21 +98,6 @@ export function Modal({ title, onClose, children, maxWidth = 480 }) {
         {children}
       </div>
     </div>
-  );
-}
-
-// Compact labelled control for toolbars. Uses a visually-hidden <label> so the
-// dense filter/search rows keep their layout while still being screen-reader
-// labelled. `as` picks input vs select.
-const srOnly = { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap", border: 0 };
-
-export function ToolbarField({ label, children }) {
-  const id = useId();
-  return (
-    <>
-      <label htmlFor={id} style={srOnly}>{label}</label>
-      {React.cloneElement(children, { id })}
-    </>
   );
 }
 
