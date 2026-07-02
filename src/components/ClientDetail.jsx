@@ -1,11 +1,13 @@
-import React, { useRef, useState } from "react";
-import { ArrowLeft, Pencil, Trash2, Paperclip, Link2, FileText, Upload, ExternalLink, Search, Plus } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Pencil, Trash2, Paperclip, Link2, FileText, Upload, ExternalLink, Search, Plus, Share2, Copy, RefreshCw, Mail } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, SH, SHs, btn, iconBtn, input, lbl } from "../lib/theme";
 import { STATUS_LABEL } from "../lib/constants";
 import { money } from "../lib/format";
+import { portalPath } from "../lib/router";
 import {
   addResourceLink, uploadResourceFile, deleteResource, fetchFileObjectUrl, MAX_FILE_BYTES,
   createKeyword, updateKeyword, deleteKeyword,
+  getPortalToken, createPortalToken, setPortalTokenEnabled, getReportEmail, setReportEmail,
 } from "../lib/api";
 import { Empty } from "./ui";
 import { KeywordRows, KeywordForm, keywordSummary } from "./Keywords";
@@ -42,6 +44,11 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
   const [err, setErr] = useState("");
   const [kwForm, setKwForm] = useState(false);
   const [kwEditing, setKwEditing] = useState(null);
+  // Client portal share link: null while loading, then { token, enabled }.
+  const [portal, setPortal] = useState(null);
+  const [copied, setCopied] = useState(false);
+  // Monthly report email recipient (loaded flag gates the Save button).
+  const [email, setEmail] = useState({ recipient: "", enabled: true, loaded: false, saved: false });
   const fileRef = useRef(null);
 
   const guard = async (fn) => {
@@ -50,6 +57,45 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
     catch (e) { setErr(e?.message || "Something went wrong."); }
     setBusy(false);
   };
+
+  // Load the portal link + report email state for this client.
+  useEffect(() => {
+    let alive = true;
+    setPortal(null); setCopied(false);
+    setEmail({ recipient: "", enabled: true, loaded: false, saved: false });
+    getPortalToken(client.id)
+      .then((r) => { if (alive) setPortal(r); })
+      .catch((e) => { if (alive) { setPortal({ token: null }); setErr(e?.message || "Could not load the portal link."); } });
+    getReportEmail(client.id)
+      .then((r) => { if (alive) setEmail({ recipient: r.recipient || "", enabled: r.recipient == null ? true : Boolean(r.enabled), loaded: true, saved: false }); })
+      .catch(() => { if (alive) setEmail((x) => ({ ...x, loaded: true })); });
+    return () => { alive = false; };
+  }, [client.id]);
+
+  const portalUrl = portal?.token ? window.location.origin + portalPath(portal.token) : "";
+
+  const createLink = (regen) => {
+    if (regen && !window.confirm("Regenerate the portal link? The old link stops working immediately.")) return;
+    guard(async () => {
+      const { token } = await createPortalToken(client.id);
+      setPortal({ token, enabled: true });
+      setCopied(false);
+    });
+  };
+  const togglePortal = () => guard(async () => {
+    const enabled = !portal.enabled;
+    await setPortalTokenEnabled(client.id, enabled);
+    setPortal((p) => ({ ...p, enabled }));
+  });
+  const copyLink = () => guard(async () => {
+    await navigator.clipboard.writeText(portalUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  });
+  const saveEmail = () => guard(async () => {
+    await setReportEmail(client.id, email.recipient, email.enabled);
+    setEmail((x) => ({ ...x, recipient: x.recipient.trim(), saved: true }));
+  });
 
   const addLink = () => {
     if (!linkUrl.trim()) { setErr("Paste a link URL first."); return; }
@@ -174,6 +220,58 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
               ))}
             </div>
           )}
+        </div>
+
+        <div style={{ marginTop: 22 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
+            <Share2 size={16} /> Client portal
+          </div>
+          <div style={{ border: BDt, borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
+            {portal === null ? (
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#6b6580" }}>Loading…</span>
+            ) : !portal.token ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ flex: 1, minWidth: 200, fontSize: 12.5, fontWeight: 600, color: "#6b6580" }}>
+                  No share link yet. Create one to give this client a read-only view of their rankings, deliverables and monthly report — no fees or internal notes.
+                </span>
+                <button style={btn(accent, "#fff")} disabled={busy} onClick={() => createLink(false)}><Plus size={15} /> Create link</button>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 7, border: BDt, background: portal.enabled ? "#d7f5df" : "#f7dede", color: portal.enabled ? "#1f9d57" : "#c0392b" }}>
+                    {portal.enabled ? "Link active" : "Link disabled"}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 160, fontSize: 12, fontWeight: 600, color: "#6b6580", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }} title={portalUrl}>
+                    {portalUrl}
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button style={btn("#fff", ink)} disabled={busy} onClick={copyLink}><Copy size={15} /> {copied ? "Copied!" : "Copy link"}</button>
+                  <button style={btn("#fff", ink)} disabled={busy} onClick={() => createLink(true)}><RefreshCw size={15} /> Regenerate</button>
+                  <button style={btn(portal.enabled ? "#fff" : accent, portal.enabled ? ink : "#fff")} disabled={busy} onClick={togglePortal}>
+                    {portal.enabled ? "Disable link" : "Enable link"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
+            <Mail size={16} /> Monthly report email
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input style={{ ...input, flex: 2, minWidth: 180 }} type="email" placeholder="client@example.com"
+              value={email.recipient} onChange={(e) => setEmail((x) => ({ ...x, recipient: e.target.value, saved: false }))} />
+            <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+              <input type="checkbox" checked={email.enabled} onChange={(e) => setEmail((x) => ({ ...x, enabled: e.target.checked, saved: false }))} style={{ width: 16, height: 16, accentColor: accent }} />
+              Enabled
+            </label>
+            <button style={btn(accent, "#fff")} disabled={busy || !email.loaded} onClick={saveEmail}>{email.saved ? "Saved" : "Save"}</button>
+          </div>
+          <p style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 600, marginTop: 8 }}>
+            Gets an automatic SEO report on the 1st of each month (needs RESEND_API_KEY). Clear the address and untick Enabled to remove it.
+          </p>
         </div>
 
         <div style={{ marginTop: 22 }}>

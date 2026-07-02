@@ -129,6 +129,23 @@ async function ensureSchema(sql) {
     created_at timestamptz default now(),
     unique (client_id, type)
   )`;
+  // Read-only client portal: one revocable share token per client. The token
+  // is the whole credential for the public portalLoad action, so it's long,
+  // random and unique; disabling keeps the row (re-enable restores the link).
+  await sql`create table if not exists client_portal_tokens (
+    client_id uuid primary key references clients(id) on delete cascade,
+    token text not null unique,
+    enabled boolean default true,
+    created_at timestamptz default now()
+  )`;
+  // Recipient for the scheduled monthly report email (one optional address per
+  // client). Also created by monthly-report-email.mjs; created here too so the
+  // management UI works before the schedule ever runs.
+  await sql`create table if not exists client_report_emails (
+    client_id uuid primary key references clients(id) on delete cascade,
+    recipient text not null,
+    enabled boolean default true
+  )`;
   // Postgres does NOT auto-index foreign-key columns. Without these, every
   // per-client lookup and every ON DELETE CASCADE does a full table scan,
   // which degrades linearly as the client count grows. Idempotent, so they
@@ -293,6 +310,60 @@ export default async (req) => {
       return json({ error: "Wrong password. Ask your team lead for it." }, 401);
     }
     return json({ ok: true, role });
+  }
+
+  // Read-only client portal. The token in the URL is the whole credential, so
+  // this runs BEFORE the team-password check (like "login") — but still behind
+  // the fail-closed auth/DB configuration guards, and throttled with the same
+  // per-IP counter as login so tokens can't be guessed by brute force. Unknown
+  // and disabled tokens both return the same 404 on purpose.
+  if (action === "portalLoad") {
+    if (!authConfigured()) return json({ error: NOT_CONFIGURED }, 503);
+    if (!process.env.NETLIFY_DATABASE_URL) {
+      return json({ error: "Database not configured. Set NETLIFY_DATABASE_URL." }, 503);
+    }
+    const ip = clientIp(req);
+    if (loginBlocked(ip)) return json({ error: "Too many attempts. Try again in a few minutes." }, 429);
+    try {
+      const sql = db();
+      await ensureSchema(sql);
+      const token = String(payload.token || "");
+      const found = token
+        ? await sql`select client_id from client_portal_tokens where token=${token} and enabled limit 1`
+        : [];
+      if (!found.length) {
+        noteLoginFail(ip);
+        return json({ error: "Not found" }, 404);
+      }
+      const clientId = found[0].client_id;
+      // Only this client's rows, and only portal-safe columns — every SELECT
+      // lists its columns explicitly. Never fee / notes / risk / team_member /
+      // created_by, and never tasks, payments or resources.
+      const [clients, keywords, keyword_history, deliverables, client_reports, retainers] = await Promise.all([
+        sql`select name, niche, status, package, start_month from clients where id=${clientId}`,
+        sql`select id, keyword, current_rank, previous_rank, target_url, checked_at, volume,
+                   search_engine, location, platform
+            from keywords where client_id=${clientId} order by keyword`,
+        sql`select h.id, h.keyword_id, h.rank, h.recorded_at from keyword_history h
+            join keywords k on k.id = h.keyword_id
+            where k.client_id=${clientId} order by h.recorded_at asc`,
+        sql`select id, title, type, status, quantity, due_date from deliverables
+            where client_id=${clientId} order by due_date, title`,
+        sql`select period, summary from client_reports where client_id=${clientId} order by period`,
+        sql`select type, quantity from client_retainers where client_id=${clientId}`,
+      ]);
+      if (!clients.length) {
+        noteLoginFail(ip); // orphaned token — treat exactly like an unknown one
+        return json({ error: "Not found" }, 404);
+      }
+      return json({
+        client: clients[0],
+        keywords, keyword_history, deliverables, client_reports, retainers,
+        agency: { name: process.env.AGENCY_NAME || "Growth Atlas" },
+      });
+    } catch (e) {
+      return json({ error: String(e?.message || e) }, 500);
+    }
   }
 
   // Every other action requires a valid password in the header.
@@ -603,6 +674,60 @@ export default async (req) => {
       case "retainerDelete": {
         // Not admin-gated — only client deletion is.
         await sql`delete from client_retainers where id=${payload.id}`;
+        return json({ ok: true });
+      }
+
+      case "portalTokenGet": {
+        if (!payload.client_id) return json({ error: "Missing client." }, 400);
+        const rows = await sql`select token, enabled from client_portal_tokens
+          where client_id=${payload.client_id} limit 1`;
+        if (!rows.length) return json({ token: null });
+        return json({ token: rows[0].token, enabled: rows[0].enabled });
+      }
+
+      case "portalTokenCreate": {
+        if (!payload.client_id) return json({ error: "Missing client." }, 400);
+        // 64 hex chars of crypto randomness. Regenerating replaces the old
+        // token — any previously shared link stops working — and re-enables
+        // the portal (creating a fresh link implies you want it live).
+        const token = (crypto.randomUUID() + crypto.randomUUID()).replaceAll("-", "");
+        await sql`insert into client_portal_tokens (client_id, token)
+          values (${payload.client_id}, ${token})
+          on conflict (client_id) do update set
+            token=excluded.token, enabled=true, created_at=now()`;
+        return json({ token });
+      }
+
+      case "portalTokenSetEnabled": {
+        if (!payload.client_id) return json({ error: "Missing client." }, 400);
+        await sql`update client_portal_tokens set enabled=${Boolean(payload.enabled)}
+          where client_id=${payload.client_id}`;
+        return json({ ok: true });
+      }
+
+      case "reportEmailGet": {
+        if (!payload.client_id) return json({ error: "Missing client." }, 400);
+        const rows = await sql`select recipient, enabled from client_report_emails
+          where client_id=${payload.client_id} limit 1`;
+        if (!rows.length) return json({ recipient: null });
+        return json({ recipient: rows[0].recipient, enabled: rows[0].enabled });
+      }
+
+      case "reportEmailSet": {
+        if (!payload.client_id) return json({ error: "Missing client." }, 400);
+        const recipient = String(payload.recipient || "").trim();
+        const enabled = Boolean(payload.enabled);
+        if (!recipient) {
+          // Clearing the address while disabled removes the row entirely.
+          if (enabled) return json({ error: "Enter a recipient email first." }, 400);
+          await sql`delete from client_report_emails where client_id=${payload.client_id}`;
+          return json({ ok: true });
+        }
+        if (!recipient.includes("@")) return json({ error: "That doesn't look like an email address." }, 400);
+        await sql`insert into client_report_emails (client_id, recipient, enabled)
+          values (${payload.client_id}, ${recipient}, ${enabled})
+          on conflict (client_id) do update set
+            recipient=excluded.recipient, enabled=excluded.enabled`;
         return json({ ok: true });
       }
 

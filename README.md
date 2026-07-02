@@ -14,6 +14,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Clients**: add, edit, delete — status, source, package, team, dates, notes, monthly fee
 - **Monthly Report**: inside each client's detail view, generate a printable monthly snapshot — keyword rankings (current/previous/movement, top-10, avg, net improvement), deliverables with a delivered/total rollup, and a saved free-text "wins" narrative. **Print / Export** opens a clean print-friendly layout (Save as PDF)
 - **Client detail view**: click any client to see everything in one place, plus a **Resources** panel — attach links (Google Drive, Canva, Sheets…) *and* upload job files (stored in Netlify Blobs, up to 4 MB each)
+- **Client portal**: give each client a private, read-only share link (`/portal/<token>`, no login) showing their keyword rankings with movement and rank-over-time charts, the month's deliverables, retainer scope progress and the saved monthly narrative — and nothing internal (no fees, notes or team data). Create, copy, disable/enable or regenerate the link from the client's detail view; regenerating or disabling revokes the old link instantly. Set the optional `AGENCY_NAME` env var to white-label the portal branding (defaults to "Growth Atlas"). The same panel also sets the **monthly report email** recipient used by the scheduled report emailer
 - **Task Board** (kanban): Guest Post, On-Page, Backlink, Anchor Text, Blog, Audit, Schema. Assign people, move To Do → In Progress → Done
 - **Deliverables**: track what you owe each client — type, quantity, due date, and status (Planned / In Progress / Delivered / Blocked), grouped by client with a per-client delivered/total summary
 - **Retainer / scope tracking**: set each client's agreed monthly scope (included quantity per deliverable type) and see included-vs-delivered per month with an **over scope / complete / to-go** flag — catches scope creep. Surfaced in the client detail, the Monthly Report, and the Overview's "Needs attention" list
@@ -39,6 +40,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Project configuration → Environment variables → Add a variable**:
   - `APP_PASSWORD` — the shared password your team logs in with.
   - `ADMIN_PASSWORD` — *(optional)* a separate password that unlocks deleting clients. Skip it and everyone with `APP_PASSWORD` can delete too.
+  - `AGENCY_NAME` — *(optional)* the agency name shown on client portal pages (defaults to "Growth Atlas"). Portal share links themselves need no setup — they're unguessable per-client tokens you create in the app, and you can disable or regenerate them at any time to revoke access.
 
 ### 4. Deploy
 - **Deploys → Trigger deploy → Deploy site.** You get a public link.
@@ -103,7 +105,8 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
         ├── Revenue.jsx         MRR, collected/pending, payment tracker
         ├── Team.jsx            Per-member workload
         ├── ClientForm.jsx      Add / edit client modal
-        ├── ClientDetail.jsx    Client detail view + resources (links & files)
+        ├── ClientDetail.jsx    Client detail view + resources, portal link, report email
+        ├── Portal.jsx          Public read-only client portal (/portal/:token)
         ├── ClientReport.jsx    Printable per-client monthly report + narrative
         ├── ClientScope.jsx     Retainer scope: included vs delivered per month
         └── ui.jsx              Small shared pieces (Field, Pick, Panel, RevCard...)

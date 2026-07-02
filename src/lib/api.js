@@ -113,3 +113,29 @@ export const deleteReport = (id) => call("reportDelete", { id });
 /* ---------------- retainers (agreed monthly scope per client) ---------------- */
 export const saveRetainer = (client_id, type, quantity) => call("retainerSave", { client_id, type, quantity });
 export const deleteRetainer = (id) => call("retainerDelete", { id });
+
+/* ---------------- client portal (read-only share links) ---------------- */
+export const getPortalToken = (client_id) => call("portalTokenGet", { client_id });
+export const createPortalToken = (client_id) => call("portalTokenCreate", { client_id });
+export const setPortalTokenEnabled = (client_id, enabled) => call("portalTokenSetEnabled", { client_id, enabled });
+
+// Public portal load: the token IS the credential, so no password header —
+// clients open their link without a team session.
+export async function portalLoad(token) {
+  const res = await fetch("/api/data", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "portalLoad", payload: { token } }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+/* ---------------- monthly report email recipient ---------------- */
+export const getReportEmail = (client_id) => call("reportEmailGet", { client_id });
+export const setReportEmail = (client_id, recipient, enabled) => call("reportEmailSet", { client_id, recipient, enabled });

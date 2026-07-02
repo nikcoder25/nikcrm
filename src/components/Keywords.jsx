@@ -208,7 +208,9 @@ function KeywordHistoryModal({ keyword, points, onClose }) {
 }
 
 // Shared per-client keyword table. Used in ClientDetail (and available to the
-// tab). Same props contract as before: keywords, history, onEdit, onDelete.
+// tab). Props contract: keywords, history, onEdit, onDelete — the edit/delete
+// buttons are hidden when their handler is missing, so the read-only client
+// portal can reuse the exact same rows (and rank-history chart).
 export function KeywordRows({ keywords, history = [], onEdit, onDelete }) {
   const [histKw, setHistKw] = useState(null);
   const byKw = useMemo(() => {
@@ -243,8 +245,8 @@ export function KeywordRows({ keywords, history = [], onEdit, onDelete }) {
             {hasChart
               ? <button title="Rank history" onClick={() => setHistKw(k)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", width: 104 }}><RankChart points={pts} /></button>
               : <span style={{ width: 104, fontSize: 11, color: "#a39db5", fontWeight: 700, textAlign: "center" }}>—</span>}
-            <button style={iconBtn} title="Edit" onClick={() => onEdit(k)}><Pencil size={15} /></button>
-            <button style={iconBtn} title="Delete" onClick={() => onDelete(k.id)}><Trash2 size={15} /></button>
+            {onEdit && <button style={iconBtn} title="Edit" onClick={() => onEdit(k)}><Pencil size={15} /></button>}
+            {onDelete && <button style={iconBtn} title="Delete" onClick={() => onDelete(k.id)}><Trash2 size={15} /></button>}
           </div>
         );
       })}
