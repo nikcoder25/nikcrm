@@ -126,7 +126,8 @@ export default async () => {
         sql`select keyword, current_rank, previous_rank from keywords
             where client_id=${r.client_id} order by keyword`,
         sql`select title, type, status, due_date from deliverables
-            where client_id=${r.client_id} and to_char(due_date, 'YYYY-MM') = ${period}
+            where client_id=${r.client_id}
+              and coalesce(nullif(month, ''), to_char(due_date, 'YYYY-MM')) = ${period}
             order by due_date, title`,
         sql`select summary from client_reports
             where client_id=${r.client_id} and period=${period} limit 1`,

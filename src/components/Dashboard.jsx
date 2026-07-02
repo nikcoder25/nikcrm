@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles } from "lucide-react";
+import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles, Menu, X } from "lucide-react";
 import * as api from "../lib/api";
-import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, globalCss } from "../lib/theme";
+import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, iconBtn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
 import { useRouter, clientIdFromPath, clientPath } from "../lib/router";
+import { useToast } from "../lib/toast";
 import { Center, Panel, Empty } from "./ui";
 import Overview from "./Overview";
 import Activity from "./Activity";
@@ -33,12 +34,16 @@ export default function Dashboard({ session, onSignOut }) {
   const [reports, setReports] = useState([]);
   const [retainers, setRetainers] = useState([]);
   const [activity, setActivity] = useState([]);
+  const [members, setMembers] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
   const [tab, setTab] = useState("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile drawer
+
+  const toast = useToast();
 
   // The open client detail lives in the URL (/clients/:id) so it's linkable and
   // survives a refresh, instead of being a modal driven by local state.
@@ -50,10 +55,12 @@ export default function Dashboard({ session, onSignOut }) {
 
   const openClient = (c) => navigate(clientPath(c.id));
   const backToClients = () => { setTab("clients"); navigate("/"); };
+  // Switch tabs, close the mobile drawer, and leave any open detail page.
+  const goTab = (k) => { setTab(k); setSidebarOpen(false); if (detailId) navigate("/"); };
 
-  // A 401 means our stored password is no longer valid (e.g. it was rotated).
-  // Drop the stale session and bounce to the login screen instead of leaving
-  // the user stuck behind a permanent error banner.
+  // A 401 means our stored session is no longer valid (e.g. the password was
+  // rotated). Drop the stale session and bounce to the login screen instead of
+  // leaving the user stuck behind a permanent error banner.
   const handleErr = (e, fallback) => {
     if (e?.status === 401) { onSignOut(); return; }
     setError(e?.message || fallback);
@@ -74,6 +81,7 @@ export default function Dashboard({ session, onSignOut }) {
     ai_citation_history: setAiCitationHistory,
     client_reports: setReports,
     client_retainers: setRetainers,
+    team_members: setMembers,
     activity: setActivity,
   };
 
@@ -112,72 +120,90 @@ export default function Dashboard({ session, onSignOut }) {
     return () => clearInterval(id);
   }, []);
 
-  // Wrap each mutation so a failure surfaces instead of silently doing nothing.
+  // Throwing save used by modal forms — they manage their own busy/toast/close.
+  // Pass `sets` for a narrow re-fetch (see `run`), omit it for a full refresh.
+  const save = async (fn, sets) => {
+    setError("");
+    try { await fn(); await (sets ? refreshSome(sets) : refresh()); }
+    catch (e) { if (e?.status === 401) onSignOut(); throw e; }
+  };
+
+  // Fire-and-forget used by inline actions — toasts the result, never throws.
   // The follow-up refresh happens in place (no loading flash): pass `sets` with
   // the datasets the mutation touches for a narrow re-fetch, or omit it for a
   // full refresh (client save/delete cascade too widely to enumerate). On
   // failure we always do a FULL refresh, so any optimistic local change rolls
   // back to server truth. Returns the API result (undefined on failure) so
   // callers like the bulk-add modal can report success counts.
-  const run = async (fn, sets) => {
+  const run = async (fn, sets, okMsg) => {
     setError("");
-    try { const result = await fn(); await (sets ? refreshSome(sets) : refresh()); return result; }
-    catch (e) {
-      handleErr(e, "Something went wrong.");
-      if (e?.status !== 401) await refresh();
+    try {
+      const result = await fn();
+      await (sets ? refreshSome(sets) : refresh());
+      if (okMsg) toast(okMsg);
+      return result;
+    } catch (e) {
+      if (e?.status === 401) { onSignOut(); return undefined; }
+      toast(e?.message || "Something went wrong.", "error");
+      await refresh(); // roll back any optimistic change to server truth
       return undefined;
     }
   };
 
-  const saveClient = (c) => run(async () => {
-    await api.saveClient(c.id ? c : { ...c, created_by: session.name });
-    setShowForm(false); setEditing(null);
-  });
+  const saveClient = (c) => save(() => api.saveClient(c.id ? c : { ...c, created_by: session.name }));
   const delClient = (id) => {
     const c = clients.find((x) => String(x.id) === String(id));
     if (!window.confirm(`Delete client "${c?.name || "this client"}"? All their tasks, payments, keywords, deliverables and files go with them. This cannot be undone.`)) return;
-    run(async () => { await api.deleteClient(id); backToClients(); });
+    run(async () => { await api.deleteClient(id); backToClients(); }, undefined, "Client deleted");
   };
-  const addTask = (t) => run(() => api.addTask(t), ["tasks"]);
-  const delTask = (id) => { if (window.confirm("Delete this task?")) run(() => api.deleteTask(id), ["tasks"]); };
-  const createDeliverable = (d) => run(() => api.createDeliverable(d), ["deliverables"]);
-  const delDeliverable = (id) => { if (window.confirm("Delete this deliverable?")) run(() => api.deleteDeliverable(id), ["deliverables"]); };
-  // Top up this month's deliverables to every active client's retainer scope.
-  const generateDeliverables = () => run(() => api.generateMonthDeliverables({ all: true, month: ym(new Date()) }), ["deliverables"]);
-  const createBacklink = (b) => run(() => api.createBacklink({ ...b, created_by: session.name }), ["backlinks"]);
-  const delBacklink = (id) => { if (window.confirm("Delete this backlink?")) run(() => api.deleteBacklink(id), ["backlinks"]); };
-  const createAiCitation = (c) => run(() => api.createAiCitation(c), ["ai_citations", "ai_citation_history"]);
-  const delAiCitation = (id) => { if (window.confirm("Delete this prompt and its check history?")) run(() => api.deleteAiCitation(id), ["ai_citations", "ai_citation_history"]); };
-  const createKeyword = (k) => run(() => api.createKeyword(k), ["keywords", "keyword_history"]);
-  const updateKeyword = (k) => run(() => api.updateKeyword(k), ["keywords", "keyword_history"]);
-  const delKeyword = (id) => { if (window.confirm("Delete this keyword and its rank history?")) run(() => api.deleteKeyword(id), ["keywords", "keyword_history"]); };
-  const bulkAddKeywords = (p) => run(() => api.bulkAddKeywords(p), ["keywords", "keyword_history"]);
-  // Bulk delete is confirmed inside Keywords.jsx (it knows the selection count).
-  const bulkDeleteKeywords = (ids) => run(() => api.bulkDeleteKeywords(ids), ["keywords", "keyword_history"]);
 
+  const saveTask = (t) => save(() => api.addTask(t), ["tasks"]);
+  const delTask = (id) => { if (window.confirm("Delete this task?")) run(() => api.deleteTask(id), ["tasks"], "Task deleted"); };
   // High-frequency status changes are applied to local state IMMEDIATELY
-  // (optimistic), then synced to the server; the background refresh restores
-  // server truth. On failure, handleErr shows the error and refresh resyncs.
+  // (optimistic), then synced to the server; on failure `run` resyncs.
   const moveTask = (id, status) => {
     setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status } : t)));
     run(() => api.moveTask(id, status), ["tasks"]);
   };
-  const updateDeliverable = (d) => {
+  const assignTask = (id, assignee) => {
+    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, assignee } : t)));
+    run(() => api.assignTask(id, assignee), ["tasks"]);
+  };
+
+  const saveDeliverable = (d) => save(() => (d.id ? api.updateDeliverable(d) : api.createDeliverable(d)), ["deliverables"]);
+  const statusDeliverable = (d) => {
     setDeliverables((ds) => ds.map((x) => (x.id === d.id ? { ...x, ...d } : x)));
     run(() => api.updateDeliverable(d), ["deliverables"]);
   };
+  const delDeliverable = (id) => { if (window.confirm("Delete this deliverable?")) run(() => api.deleteDeliverable(id), ["deliverables"], "Deliverable deleted"); };
+  // Top up this month's deliverables to every active client's retainer scope.
+  const generateDeliverables = () => run(() => api.generateMonthDeliverables({ all: true, month: ym(new Date()) }), ["deliverables"]);
+
+  const createBacklink = (b) => run(() => api.createBacklink({ ...b, created_by: session.name }), ["backlinks"]);
   const updateBacklink = (b) => {
     setBacklinks((bs) => bs.map((x) => (x.id === b.id ? { ...x, ...b } : x)));
     run(() => api.updateBacklink(b), ["backlinks"]);
   };
+  const delBacklink = (id) => { if (window.confirm("Delete this backlink?")) run(() => api.deleteBacklink(id), ["backlinks"], "Backlink deleted"); };
+
+  const createAiCitation = (c) => run(() => api.createAiCitation(c), ["ai_citations", "ai_citation_history"]);
   const updateAiCitation = (c) => {
     setAiCitations((cs) => cs.map((x) => (x.id === c.id ? { ...x, ...c } : x)));
     run(() => api.updateAiCitation(c), ["ai_citations", "ai_citation_history"]);
   };
+  const delAiCitation = (id) => { if (window.confirm("Delete this prompt and its check history?")) run(() => api.deleteAiCitation(id), ["ai_citations", "ai_citation_history"], "Prompt deleted"); };
+
+  const createKeyword = (k) => run(() => api.createKeyword(k), ["keywords", "keyword_history"]);
+  const updateKeyword = (k) => run(() => api.updateKeyword(k), ["keywords", "keyword_history"]);
+  const delKeyword = (id) => { if (window.confirm("Delete this keyword and its rank history?")) run(() => api.deleteKeyword(id), ["keywords", "keyword_history"], "Keyword deleted"); };
+  const bulkAddKeywords = (p) => run(() => api.bulkAddKeywords(p), ["keywords", "keyword_history"]);
+  // Bulk delete is confirmed inside Keywords.jsx (it knows the selection count).
+  const bulkDeleteKeywords = (ids) => run(() => api.bulkDeleteKeywords(ids), ["keywords", "keyword_history"]);
   const starKeyword = (id, starred) => {
     setKeywords((ks) => ks.map((k) => (k.id === id ? { ...k, starred } : k)));
     run(() => api.starKeyword(id, starred), ["keywords", "keyword_history"]);
   };
+
   const setPayment = (client_id, month, patch) => {
     setPayments((ps) => {
       const i = ps.findIndex((p) => p.client_id === client_id && p.month === month);
@@ -186,6 +212,9 @@ export default function Dashboard({ session, onSignOut }) {
     });
     run(() => api.setPayment(client_id, month, patch), ["payments"]);
   };
+
+  const saveMember = (m) => save(() => (m.id ? api.updateMember(m) : api.createMember(m)), ["team_members"]);
+  const delMember = (id) => run(() => api.deleteMember(id), ["team_members"], "Team member removed");
 
   const NAV = [
     { k: "overview", l: "Overview", i: LayoutDashboard },
@@ -207,18 +236,24 @@ export default function Dashboard({ session, onSignOut }) {
     </div>
   );
 
+  const openAddClient = () => { setEditing(null); setShowForm(true); };
+
   return (
     <div className="shell" style={{ display: "flex", minHeight: "100vh", background: cream, color: ink, fontFamily: "'Inter',sans-serif" }}>
       <style>{globalCss}</style>
-      <aside className="side" style={{ width: 244, flexShrink: 0, background: "#241146", color: "#f4eeff", padding: "22px 16px", display: "flex", flexDirection: "column", borderRight: BD, position: "sticky", top: 0, height: "100vh" }}>
+
+      <div className={"side-backdrop" + (sidebarOpen ? " show" : "")} onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+
+      <aside className={"side" + (sidebarOpen ? " open" : "")} style={{ width: 244, flexShrink: 0, background: "#241146", color: "#f4eeff", padding: "22px 16px", display: "flex", flexDirection: "column", borderRight: BD, position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 11, paddingBottom: 18, borderBottom: "3px dashed rgba(255,255,255,.25)", marginBottom: 14 }}>
           <div style={{ width: 42, height: 42, borderRadius: 11, background: "#fff", color: ink, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: disp, fontSize: 16, border: BD, boxShadow: SHs }}>GA</div>
-          <div><div style={{ fontFamily: disp, fontSize: 17, color: "#fff" }}>Growth Atlas</div><div style={{ fontSize: 10.5, color: "#c9bdf0", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>SEO Ops</div></div>
+          <div style={{ flex: 1 }}><div style={{ fontFamily: disp, fontSize: 17, color: "#fff" }}>Growth Atlas</div><div style={{ fontSize: 10.5, color: "#c9bdf0", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>SEO Ops</div></div>
+          <button className="mobbar" onClick={() => setSidebarOpen(false)} aria-label="Close menu" style={{ background: "rgba(255,255,255,.12)", border: "none", borderRadius: 8, padding: 6, color: "#fff", cursor: "pointer" }}><X size={18} /></button>
         </div>
-        <nav className="nav" style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
+        <nav className="nav" aria-label="Main navigation" style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
           {NAV.map((n) => {
-            const I = n.i, on = tab === n.k;
-            return <button key={n.k} className="ni" onClick={() => { setTab(n.k); if (detailId) navigate("/"); }}
+            const I = n.i, on = tab === n.k && !detailId;
+            return <button key={n.k} className="ni" onClick={() => goTab(n.k)} aria-current={on ? "page" : undefined}
               style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", borderRadius: 11, border: on ? BD : "3px solid transparent", background: on ? "#fff" : "transparent", color: on ? ink : "#c9bdf0", fontWeight: on ? 800 : 700, fontSize: 14.5, cursor: "pointer", textAlign: "left", boxShadow: on ? "4px 4px 0 rgba(0,0,0,.4)" : "none" }}>
               <I size={17} /> <span>{n.l}</span>
             </button>;
@@ -237,6 +272,12 @@ export default function Dashboard({ session, onSignOut }) {
       </aside>
 
       <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        {/* Mobile top bar (hidden on desktop via .mobbar) */}
+        <div className="mobbar" style={{ alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: BD, background: "#fff", position: "sticky", top: 0, zIndex: 100 }}>
+          <button onClick={() => setSidebarOpen(true)} aria-label="Open menu" style={{ ...iconBtn }}><Menu size={20} /></button>
+          <span style={{ fontFamily: disp, fontSize: 18 }}>Growth Atlas</span>
+        </div>
+
         {errorBanner}
         {detailId ? (
           <div style={{ padding: 28 }}>
@@ -260,11 +301,8 @@ export default function Dashboard({ session, onSignOut }) {
                 />
               ) : (
                 <Panel>
-                  <Empty>
+                  <Empty action={<button style={{ ...btn(accent, "#fff"), display: "inline-flex" }} onClick={backToClients}>Back to clients</button>}>
                     This client could not be found.
-                    <div style={{ marginTop: 16 }}>
-                      <button style={{ ...btn(accent, "#fff"), display: "inline-flex" }} onClick={backToClients}>Back to clients</button>
-                    </div>
                   </Empty>
                 </Panel>
               )}
@@ -272,28 +310,28 @@ export default function Dashboard({ session, onSignOut }) {
         ) : (
           <>
             <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 28px", borderBottom: BD, flexWrap: "wrap", gap: 12 }}>
-              <div style={{ fontFamily: disp, fontSize: 26, textTransform: "uppercase", letterSpacing: "-0.02em" }}>{NAV.find((n) => n.k === tab)?.l}</div>
-              {tab === "clients" && <button style={btn(accent, "#fff")} onClick={() => { setEditing(null); setShowForm(true); }}><Plus size={16} /> Add client</button>}
+              <h1 style={{ fontFamily: disp, fontSize: 26, textTransform: "uppercase", letterSpacing: "-0.02em" }}>{NAV.find((n) => n.k === tab)?.l}</h1>
+              {tab === "clients" && <button style={btn(accent, "#fff")} onClick={openAddClient}><Plus size={16} /> Add client</button>}
             </header>
 
             <div style={{ padding: 28 }}>
               {loading ? <Center>Loading your board...</Center> :
-                tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} activity={activity} /> :
-                tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
-                tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
-                tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} onGenerate={generateDeliverables} /> :
+                tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} activity={activity} onNavigate={goTab} /> :
+                tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} onAdd={openAddClient} /> :
+                tab === "tasks" ? <Board clients={clients} tasks={tasks} members={members} onAdd={saveTask} onMove={moveTask} onAssign={assignTask} onDelete={delTask} /> :
+                tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onSave={saveDeliverable} onStatus={statusDeliverable} onDelete={delDeliverable} onGenerate={generateDeliverables} /> :
                 tab === "backlinks" ? <Backlinks clients={clients} backlinks={backlinks} onCreate={createBacklink} onUpdate={updateBacklink} onDelete={delBacklink} /> :
                 tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
                 tab === "ai" ? <AiVisibility clients={clients} citations={aiCitations} onCreate={createAiCitation} onUpdate={updateAiCitation} onDelete={delAiCitation} /> :
                 tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
                 tab === "activity" ? <Activity items={activity} clients={clients} /> :
-                <Team clients={clients} tasks={tasks} isAdmin={isAdmin} />}
+                <Team members={members} clients={clients} tasks={tasks} onSave={saveMember} onDelete={delMember} isAdmin={isAdmin} />}
             </div>
           </>
         )}
       </main>
 
-      {showForm && <ClientForm initial={editing} onClose={() => { setShowForm(false); setEditing(null); }} onSave={saveClient} />}
+      {showForm && <ClientForm initial={editing} members={members} onClose={() => { setShowForm(false); setEditing(null); }} onSave={saveClient} />}
     </div>
   );
 }

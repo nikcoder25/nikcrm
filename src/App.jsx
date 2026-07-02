@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { getSession, signOut } from "./lib/api";
 import { useRouter, portalTokenFromPath } from "./lib/router";
+import { ToastProvider } from "./lib/toast";
 import Login from "./components/Login";
 import Dashboard from "./components/Dashboard";
 import Portal from "./components/Portal";
@@ -14,6 +15,11 @@ export default function App() {
   const portalToken = portalTokenFromPath(path);
   if (portalToken) return <Portal token={portalToken} />;
 
-  if (!session) return <Login onLogin={setSession} />;
-  return <Dashboard session={session} onSignOut={() => { signOut(); setSession(null); }} />;
+  return (
+    <ToastProvider>
+      {!session
+        ? <Login onLogin={setSession} />
+        : <Dashboard session={session} onSignOut={() => { signOut(); setSession(null); }} />}
+    </ToastProvider>
+  );
 }

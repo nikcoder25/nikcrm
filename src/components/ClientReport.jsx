@@ -5,8 +5,9 @@ import { typeLabel, deliverableStatusLabel } from "../lib/constants";
 import { ym, ymLabel } from "../lib/format";
 import { keywordSummary, movement } from "./Keywords";
 import { aiCitationSummary } from "./AiVisibility";
-import { scopeRows } from "../lib/scope";
+import { scopeRows, deliverableMonth } from "../lib/scope";
 import { saveReport, gscLoad } from "../lib/api";
+import { useToast } from "../lib/toast";
 import { Empty } from "./ui";
 
 const arrow = (dir) => (dir === "up" ? "▲" : dir === "down" ? "▼" : dir === "new" ? "•" : "–");
@@ -82,9 +83,13 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
     return [...set].sort().reverse();
   })();
 
+  const toast = useToast();
   const ks = keywordSummary(keywords);
   const netImprovement = keywords.reduce((s, k) => (k.current_rank != null && k.previous_rank != null ? s + (Number(k.previous_rank) - Number(k.current_rank)) : s), 0);
-  const delivered = deliverables.filter((d) => d.status === "delivered").length;
+  // Only deliverables attributed to the selected month, so the count here agrees
+  // with the Scope section below (both are month-scoped) instead of contradicting it.
+  const monthDeliverables = deliverables.filter((d) => deliverableMonth(d) === month);
+  const delivered = monthDeliverables.filter((d) => d.status === "delivered").length;
   // Backlinks placed in the selected month (by placed_date); section hidden when empty.
   const placedLinks = backlinks.filter((b) => String(b.placed_date || "").slice(0, 7) === month);
   const ai = aiCitationSummary(aiCitations);
@@ -92,9 +97,10 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
   const dirty = draft !== savedForMonth;
 
   const save = async () => {
+    if (busy) return;
     setBusy(true); setMsg("");
-    try { await saveReport(client.id, month, draft); await onChanged("client_reports"); setMsg("Saved"); }
-    catch (e) { setMsg(e?.message || "Could not save."); }
+    try { await saveReport(client.id, month, draft); await onChanged("client_reports"); setMsg("Saved"); toast("Report saved"); }
+    catch (e) { setMsg(e?.message || "Could not save."); toast(e?.message || "Could not save report.", "error"); }
     setBusy(false);
   };
 
@@ -240,15 +246,15 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
           </div>
         )}
 
-        {/* Deliverables */}
+        {/* Deliverables (this month) */}
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", marginBottom: 8 }}>Deliverables</div>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: "#4b4560", marginBottom: 10 }}>
-            <b>{delivered}</b> delivered of <b>{deliverables.length}</b>
+            <b>{delivered}</b> delivered of <b>{monthDeliverables.length}</b> this month
           </div>
-          {deliverables.length === 0 ? <Empty>No deliverables logged for this client.</Empty> : (
+          {monthDeliverables.length === 0 ? <Empty>No deliverables logged for {ymLabel(month)}.</Empty> : (
             <div style={{ border: BDt, borderRadius: 8, overflow: "hidden" }}>
-              {deliverables.map((d) => (
+              {monthDeliverables.map((d) => (
                 <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f0ece2", fontSize: 13 }}>
                   <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 6, border: BDt, textTransform: "uppercase", background: tint }}>{typeLabel(d.type)}</span>
                   <span style={{ flex: 1, fontWeight: 700 }}>{d.title || typeLabel(d.type)}{Number(d.quantity) > 1 ? ` ×${d.quantity}` : ""}</span>

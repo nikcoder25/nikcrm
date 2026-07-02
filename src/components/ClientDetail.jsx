@@ -9,6 +9,7 @@ import {
   createKeyword, updateKeyword, deleteKeyword,
   getPortalToken, createPortalToken, setPortalTokenEnabled, getReportEmail, setReportEmail, gscLoad,
 } from "../lib/api";
+import { useToast } from "../lib/toast";
 import { Empty } from "./ui";
 import { KeywordRows, KeywordForm, keywordSummary } from "./Keywords";
 import ClientScope from "./ClientScope";
@@ -221,11 +222,12 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
   // Monthly report email recipient (loaded flag gates the Save button).
   const [email, setEmail] = useState({ recipient: "", enabled: true, loaded: false, saved: false });
   const fileRef = useRef(null);
+  const toast = useToast();
 
-  const guard = async (fn) => {
+  const guard = async (fn, okMsg) => {
     setErr(""); setBusy(true);
-    try { await fn(); }
-    catch (e) { setErr(e?.message || "Something went wrong."); }
+    try { await fn(); if (okMsg) toast(okMsg); }
+    catch (e) { setErr(e?.message || "Something went wrong."); toast(e?.message || "Something went wrong.", "error"); }
     setBusy(false);
   };
 
@@ -274,7 +276,7 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
       await addResourceLink(client.id, linkLabel.trim(), linkUrl.trim());
       setLinkLabel(""); setLinkUrl("");
       onChanged("resources");
-    });
+    }, "Link added");
   };
 
   const onPickFile = (e) => {
@@ -282,7 +284,7 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
     if (fileRef.current) fileRef.current.value = ""; // allow re-picking the same file
     if (!file) return;
     if (file.size > MAX_FILE_BYTES) { setErr("File too large (max 4 MB)."); return; }
-    guard(async () => { await uploadResourceFile(client.id, file); onChanged("resources"); });
+    guard(async () => { await uploadResourceFile(client.id, file); onChanged("resources"); }, "File uploaded");
   };
 
   const openFile = (r) => guard(async () => {
@@ -292,17 +294,19 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
 
   const removeResource = (id) => {
     if (!window.confirm("Remove this resource? Uploaded files are deleted permanently.")) return;
-    guard(async () => { await deleteResource(id); onChanged("resources"); });
+    guard(async () => { await deleteResource(id); onChanged("resources"); }, "Resource removed");
   };
 
+  // The shared KeywordForm (from Keywords.jsx) is fire-and-forget, so the
+  // form is closed here once the save has gone through.
   const saveKeyword = (k) => guard(async () => {
     await (k.id ? updateKeyword(k) : createKeyword(k));
     setKwForm(false); setKwEditing(null);
     onChanged("keywords", "keyword_history");
-  });
+  }, k.id ? "Keyword updated" : "Keyword added");
   const removeKeyword = (id) => {
     if (!window.confirm("Delete this keyword and its rank history?")) return;
-    guard(async () => { await deleteKeyword(id); onChanged("keywords", "keyword_history"); });
+    guard(async () => { await deleteKeyword(id); onChanged("keywords", "keyword_history"); }, "Keyword deleted");
   };
 
   const kstats = keywordSummary(keywords);
@@ -318,15 +322,15 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
       <div style={pageCard}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
           <div>
-            <div style={{ fontFamily: disp, fontSize: 22, lineHeight: 1.1 }}>{client.name}</div>
+            <h1 style={{ fontFamily: disp, fontSize: 22, lineHeight: 1.1 }}>{client.name}</h1>
             <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
               <span style={{ padding: "4px 11px", borderRadius: 7, fontSize: 11, fontWeight: 800, border: BDt, background: client.status === "active" ? accent : "#fff", color: client.status === "active" ? "#fff" : ink }}>{STATUS_LABEL[client.status] || client.status}</span>
               {client.source && <span style={{ padding: "4px 11px", borderRadius: 7, fontSize: 11, fontWeight: 800, border: BDt, background: tint }}>{client.source}</span>}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button style={iconBtn} title="Edit" onClick={() => onEdit(client)}><Pencil size={16} /></button>
-            {isAdmin && <button style={iconBtn} title="Delete client" onClick={() => onDeleteClient(client.id)}><Trash2 size={16} /></button>}
+            <button style={iconBtn} title="Edit" aria-label="Edit client" onClick={() => onEdit(client)}><Pencil size={16} /></button>
+            {isAdmin && <button style={iconBtn} title="Delete client" aria-label="Delete client" onClick={() => onDeleteClient(client.id)}><Trash2 size={16} /></button>}
           </div>
         </div>
 
@@ -349,16 +353,16 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
         </div>
 
         <div style={{ marginTop: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
+          <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
             <Paperclip size={16} /> Resources & files
-          </div>
+          </h2>
 
           {err && <div style={{ background: tint, border: BDt, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
 
           {/* add link */}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-            <input style={{ ...input, flex: 1, minWidth: 120 }} placeholder="Label (e.g. Keyword sheet)" value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} />
-            <input style={{ ...input, flex: 2, minWidth: 160 }} placeholder="Paste a link (Drive, Canva, Sheets…)" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} />
+            <input style={{ ...input, flex: 1, minWidth: 120 }} placeholder="Label (e.g. Keyword sheet)" aria-label="Resource label" value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} />
+            <input style={{ ...input, flex: 2, minWidth: 160 }} placeholder="Paste a link (Drive, Canva, Sheets…)" aria-label="Resource link URL" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} />
             <button style={btn(accent, "#fff")} disabled={busy} onClick={addLink}><Link2 size={15} /> Add link</button>
           </div>
 
@@ -386,9 +390,9 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
                     </div>
                   </div>
                   {r.kind === "file"
-                    ? <button style={iconBtn} title="Open file" disabled={busy} onClick={() => openFile(r)}><ExternalLink size={15} /></button>
-                    : <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ ...iconBtn, textDecoration: "none" }} title="Open link"><ExternalLink size={15} /></a>}
-                  <button style={iconBtn} title="Remove" disabled={busy} onClick={() => removeResource(r.id)}><Trash2 size={15} /></button>
+                    ? <button style={iconBtn} title="Open file" aria-label={`Open file ${r.filename || r.label || ""}`} disabled={busy} onClick={() => openFile(r)}><ExternalLink size={15} /></button>
+                    : <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ ...iconBtn, textDecoration: "none" }} title="Open link" aria-label={`Open link ${r.label || r.url}`}><ExternalLink size={15} /></a>}
+                  <button style={iconBtn} title="Remove" aria-label="Remove resource" disabled={busy} onClick={() => removeResource(r.id)}><Trash2 size={15} /></button>
                 </div>
               ))}
             </div>
@@ -449,9 +453,9 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
 
         <div style={{ marginTop: 22 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>
+            <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>
               <Search size={16} /> Keyword ranks
-            </div>
+            </h2>
             {keywords.length > 0 && (
               <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>
                 avg {kstats.avg == null ? "—" : `#${kstats.avg}`} · {kstats.top10} in top 10

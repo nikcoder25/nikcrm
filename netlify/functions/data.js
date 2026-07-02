@@ -172,6 +172,23 @@ async function ensureSchema(sql) {
     created_at timestamptz default now(),
     unique (client_id, type)
   )`;
+  // Team roster: assignees are now real records. clients.team_member and
+  // tasks.assignee still store the member NAME (keeps existing data valid and
+  // avoids a risky id migration); the roster just populates the dropdowns.
+  await sql`create table if not exists team_members (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    role text default '',
+    email text default '',
+    created_at timestamptz default now()
+  )`;
+  // Deliverables are attributed to a calendar month so they can be matched to
+  // the retainer scope by type + month. Older rows may predate this column.
+  await sql`alter table deliverables add column if not exists month text default ''`;
+  // Backfill month from an existing due_date so legacy delivered items still
+  // count toward their month's scope instead of silently dropping out.
+  await sql`update deliverables set month = substring(due_date::text from 1 for 7)
+    where (month is null or month = '') and due_date is not null`;
   // Read-only client portal: one revocable share token per client. The token
   // is the whole credential for the public portalLoad action, so it's long,
   // random and unique; disabling keeps the row (re-enable restores the link).
@@ -284,6 +301,7 @@ const DATASET_QUERIES = {
     where rn <= 25 order by recorded_at asc`,
   client_reports: (sql) => sql`select id, client_id, period, summary, updated_at from client_reports`,
   client_retainers: (sql) => sql`select id, client_id, type, quantity from client_retainers`,
+  team_members: (sql) => sql`select id, name, role, email from team_members order by name asc`,
   activity: (sql) => sql`select id, actor, verb, entity, entity_label, client_id, detail, created_at
     from activity order by created_at desc limit 100`,
 };
@@ -624,7 +642,7 @@ export default async (req) => {
         sql`select h.id, h.keyword_id, h.rank, h.recorded_at from keyword_history h
             join keywords k on k.id = h.keyword_id
             where k.client_id=${clientId} order by h.recorded_at asc`,
-        sql`select id, title, type, status, quantity, due_date from deliverables
+        sql`select id, title, type, status, quantity, due_date, month from deliverables
             where client_id=${clientId} order by due_date, title`,
         sql`select period, summary from client_reports where client_id=${clientId} order by period`,
         sql`select type, quantity from client_retainers where client_id=${clientId}`,
@@ -739,6 +757,16 @@ export default async (req) => {
                     ${c.package || "Standard"}, ${Number(c.fee) || 0}, ${c.team_member || ""},
                     ${c.start_month || ""}, ${c.renewal_month || ""}, ${c.risk || "low"},
                     ${c.notes || ""}, ${gscProperty}, ${auth.name || c.created_by || ""}) returning id`;
+          // A new client with a monthly fee gets a pending payment row for the
+          // current month right away, so Revenue reflects money that's owed
+          // without waiting for someone to open the Revenue tab.
+          const fee = Number(c.fee) || 0;
+          if (ins.length && fee > 0) {
+            const month = new Date().toISOString().slice(0, 7);
+            await sql`insert into payments (client_id, month, amount, status)
+              values (${ins[0].id}, ${month}, ${fee}, 'pending')
+              on conflict (client_id, month) do nothing`;
+          }
           await logActivity(sql, { actor, verb: "created client", entity: "client", entity_label: c.name, client_id: ins[0]?.id });
         }
         return json({ ok: true });
@@ -777,6 +805,11 @@ export default async (req) => {
         const moved = await sql`select title, client_id from tasks where id=${payload.id} limit 1`;
         await sql`update tasks set status=${payload.status} where id=${payload.id}`;
         if (moved.length) await logActivity(sql, { actor, verb: "moved task", entity: "task", entity_label: `"${moved[0].title}"`, client_id: moved[0].client_id, detail: `to ${TASK_STATES.find((s) => s.key === payload.status)?.label || payload.status}` });
+        return json({ ok: true });
+      }
+
+      case "taskAssign": {
+        await sql`update tasks set assignee=${payload.assignee || ""} where id=${payload.id}`;
         return json({ ok: true });
       }
 
@@ -891,9 +924,12 @@ export default async (req) => {
         if (!d.client_id) return json({ error: "Pick a client for the deliverable." }, 400);
         const bad = badEnum("type", d.type, TASK_TYPE_KEYS) || badEnum("status", d.status, DELIVERABLE_STATE_KEYS);
         if (bad) return bad;
-        await sql`insert into deliverables (client_id, title, type, status, quantity, due_date, notes)
+        // Fall back to the due-date month, then the current month, so every
+        // deliverable is attributable to a month for scope matching.
+        const month = d.month || (d.due_date ? String(d.due_date).slice(0, 7) : new Date().toISOString().slice(0, 7));
+        await sql`insert into deliverables (client_id, title, type, status, quantity, due_date, notes, month)
           values (${d.client_id}, ${d.title || ""}, ${d.type || "other"}, ${d.status || "planned"},
-                  ${Number(d.quantity) || 1}, ${d.due_date || null}, ${d.notes || ""})`;
+                  ${Number(d.quantity) || 1}, ${d.due_date || null}, ${d.notes || ""}, ${month})`;
         await logActivity(sql, { actor, verb: "created deliverable", entity: "deliverable", entity_label: d.title || typeLabel(d.type), client_id: d.client_id });
         return json({ ok: true });
       }
@@ -903,9 +939,11 @@ export default async (req) => {
         if (!d.id) return json({ error: "Missing deliverable id." }, 400);
         const bad = badEnum("type", d.type, TASK_TYPE_KEYS) || badEnum("status", d.status, DELIVERABLE_STATE_KEYS);
         if (bad) return bad;
+        const month = d.month || (d.due_date ? String(d.due_date).slice(0, 7) : "");
         await sql`update deliverables set
           title=${d.title || ""}, type=${d.type || "other"}, status=${d.status || "planned"},
-          quantity=${Number(d.quantity) || 1}, due_date=${d.due_date || null}, notes=${d.notes || ""}
+          quantity=${Number(d.quantity) || 1}, due_date=${d.due_date || null}, notes=${d.notes || ""},
+          month=${month}
           where id=${d.id}`;
         await logActivity(sql, { actor, verb: "updated deliverable", entity: "deliverable", entity_label: d.title || typeLabel(d.type), client_id: d.client_id });
         return json({ ok: true });
@@ -940,13 +978,15 @@ export default async (req) => {
         for (const line of lines) {
           const included = Number(line.quantity) || 0;
           if (included <= 0) continue;
+          // Month attribution matches scope.js's deliverableMonth(): the
+          // explicit month column, falling back to the due-date's month.
           const [{ n }] = await sql`select count(*)::int as n from deliverables
             where client_id=${line.client_id} and type=${line.type}
-              and to_char(due_date, 'YYYY-MM') = ${month}`;
+              and coalesce(nullif(month, ''), to_char(due_date, 'YYYY-MM')) = ${month}`;
           for (let i = n; i < included; i++) {
-            await sql`insert into deliverables (client_id, title, type, status, quantity, due_date)
+            await sql`insert into deliverables (client_id, title, type, status, quantity, due_date, month)
               values (${line.client_id}, ${`${typeLabel(line.type)} ${i + 1}/${included} — ${month}`},
-                      ${line.type}, 'planned', 1, ${due})`;
+                      ${line.type}, 'planned', 1, ${due}, ${month})`;
             created += 1;
           }
         }
@@ -1209,6 +1249,34 @@ export default async (req) => {
       case "retainerDelete": {
         // Not admin-gated — only client deletion is.
         await sql`delete from client_retainers where id=${payload.id}`;
+        return json({ ok: true });
+      }
+
+      case "teamAdd": {
+        const m = payload;
+        if (!m.name || !m.name.trim()) return json({ error: "A team member name is required." }, 400);
+        await sql`insert into team_members (name, role, email)
+          values (${m.name.trim()}, ${m.role || ""}, ${m.email || ""})`;
+        await logActivity(sql, { actor, verb: "added team member", entity: "team_member", entity_label: m.name.trim() });
+        return json({ ok: true });
+      }
+
+      case "teamUpdate": {
+        const m = payload;
+        if (!m.id) return json({ error: "Missing team member id." }, 400);
+        if (!m.name || !m.name.trim()) return json({ error: "A team member name is required." }, 400);
+        await sql`update team_members set
+          name=${m.name.trim()}, role=${m.role || ""}, email=${m.email || ""}
+          where id=${m.id}`;
+        await logActivity(sql, { actor, verb: "updated team member", entity: "team_member", entity_label: m.name.trim() });
+        return json({ ok: true });
+      }
+
+      case "teamDelete": {
+        // Not admin-gated — only client deletion is. Removing a member from the
+        // roster does NOT unassign anyone: clients/tasks keep the stored name.
+        const mGone = await sql`delete from team_members where id=${payload.id} returning name`;
+        if (mGone.length) await logActivity(sql, { actor, verb: "removed team member", entity: "team_member", entity_label: mGone[0].name });
         return json({ ok: true });
       }
 

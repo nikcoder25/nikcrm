@@ -1,10 +1,24 @@
 import { describe, it, expect } from "vitest";
-import { deliveredCount, scopeRows, isOverScope } from "./scope.js";
+import { deliverableMonth, deliveredCount, scopeRows, isOverScope } from "./scope.js";
 
 const CLIENT = "c1";
 const month = "2026-07";
 const d = (over = {}) => ({
   client_id: CLIENT, type: "blog", status: "delivered", due_date: "2026-07-15", ...over,
+});
+
+describe("deliverableMonth", () => {
+  it("prefers the explicit month field", () => {
+    expect(deliverableMonth({ month: "2026-07", due_date: "2026-06-30" })).toBe("2026-07");
+  });
+  it("falls back to the due date's month for legacy rows", () => {
+    expect(deliverableMonth({ month: "", due_date: "2026-07-15" })).toBe("2026-07");
+    expect(deliverableMonth({ due_date: "2026-07-15" })).toBe("2026-07");
+  });
+  it("is unattributed without a month or due date", () => {
+    expect(deliverableMonth({ month: "", due_date: null })).toBe("");
+    expect(deliverableMonth({})).toBe("");
+  });
 });
 
 describe("deliveredCount", () => {
@@ -15,9 +29,18 @@ describe("deliveredCount", () => {
       d({ type: "guest" }),                // wrong type
       d({ due_date: "2026-06-30" }),       // wrong month
       d({ client_id: "other" }),           // wrong client
-      d({ due_date: null }),               // no due date -> not attributed
+      d({ due_date: null }),               // no due date or month -> not attributed
+      d({ month: "2026-06" }),             // explicit month overrides due_date
     ];
     expect(deliveredCount(deliverables, CLIENT, "blog", month)).toBe(1);
+  });
+
+  it("attributes by explicit month even when due_date disagrees or is missing", () => {
+    const deliverables = [
+      d({ month: "2026-07", due_date: "2026-06-30" }),
+      d({ month: "2026-07", due_date: null }),
+    ];
+    expect(deliveredCount(deliverables, CLIENT, "blog", month)).toBe(2);
   });
 });
 

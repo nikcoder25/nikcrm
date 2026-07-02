@@ -3,7 +3,7 @@ import { ink, accent, cream, tint, disp, BD, BDt, SH, SHs, sel, globalCss } from
 import { STATUS_LABEL, typeLabel, deliverableStatusLabel } from "../lib/constants";
 import { ym, ymLabel } from "../lib/format";
 import { portalLoad } from "../lib/api";
-import { scopeRows } from "../lib/scope";
+import { scopeRows, deliverableMonth } from "../lib/scope";
 import { KeywordRows, keywordSummary } from "./Keywords";
 import { Center, Empty } from "./ui";
 
@@ -15,7 +15,7 @@ const card = { background: "#fff", border: BD, borderRadius: 16, boxShadow: SH, 
 const h2 = { fontFamily: disp, fontSize: 14, textTransform: "uppercase", marginBottom: 12 };
 const muted = { fontSize: 12.5, fontWeight: 700, color: "#6b6580" };
 
-const inMonth = (dateStr, month) => Boolean(dateStr) && String(dateStr).slice(0, 7) === month;
+
 
 // "Growth Atlas" -> "GA" for the header badge.
 const initials = (name) => String(name || "").split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "GA";
@@ -54,7 +54,7 @@ export default function Portal({ token }) {
     if (!data) return [];
     const set = new Set();
     (data.client_reports || []).forEach((r) => { if (r.period) set.add(r.period); });
-    (data.deliverables || []).forEach((d) => { if (d.due_date) set.add(String(d.due_date).slice(0, 7)); });
+    (data.deliverables || []).forEach((d) => { const m = deliverableMonth(d); if (m) set.add(m); });
     if (!set.size) set.add(ym(new Date()));
     return [...set].sort().reverse();
   }, [data]);
@@ -80,7 +80,7 @@ export default function Portal({ token }) {
   const keywords = data.keywords || [];
   const activeMonth = months.includes(month) ? month : months[0];
 
-  const monthDeliverables = (data.deliverables || []).filter((d) => inMonth(d.due_date, activeMonth));
+  const monthDeliverables = (data.deliverables || []).filter((d) => deliverableMonth(d) === activeMonth);
   const delivered = monthDeliverables.filter((d) => d.status === "delivered").length;
   const summary = (data.client_reports || []).find((r) => r.period === activeMonth)?.summary || "";
 
