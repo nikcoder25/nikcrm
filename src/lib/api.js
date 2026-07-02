@@ -119,3 +119,4 @@ export const deleteMember = (id) => call("teamDelete", { id });
 /* ---------------- activity log (client interaction timeline) ---------------- */
 export const addActivity = (a) => call("activityAdd", a);
 export const deleteActivity = (id) => call("activityDelete", { id });
+export const setActivityFollowup = (id, follow_up_date) => call("activityFollowupSet", { id, follow_up_date });

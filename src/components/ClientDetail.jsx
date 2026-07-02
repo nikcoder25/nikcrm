@@ -8,7 +8,8 @@ import {
   createKeyword, updateKeyword, deleteKeyword,
 } from "../lib/api";
 import { useToast } from "../lib/toast";
-import { Empty } from "./ui";
+import { computeHealth } from "../lib/health";
+import { Empty, HealthBadge } from "./ui";
 import { KeywordRows, KeywordForm, keywordSummary } from "./Keywords";
 import ClientScope from "./ClientScope";
 import ClientReport from "./ClientReport";
@@ -37,7 +38,8 @@ function Detail({ label, value }) {
   );
 }
 
-export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], retainers = [], activities = [], author = "", isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
+export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], retainers = [], activities = [], payments = [], tasks = [], author = "", isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
+  const health = computeHealth(client, { deliverables, payments, tasks, keywords, activities });
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -97,9 +99,10 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
           <div>
             <h1 style={{ fontFamily: disp, fontSize: 22, lineHeight: 1.1 }}>{client.name}</h1>
-            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ padding: "4px 11px", borderRadius: 7, fontSize: 11, fontWeight: 800, border: BDt, background: client.status === "active" ? accent : "#fff", color: client.status === "active" ? "#fff" : ink }}>{STATUS_LABEL[client.status] || client.status}</span>
               {client.source && <span style={{ padding: "4px 11px", borderRadius: 7, fontSize: 11, fontWeight: 800, border: BDt, background: tint }}>{client.source}</span>}
+              <HealthBadge health={health} />
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>

@@ -226,6 +226,8 @@ export default function Dashboard({ session, onSignOut }) {
                   reports={reports.filter((r) => r.client_id === detailClient.id)}
                   retainers={retainers.filter((r) => r.client_id === detailClient.id)}
                   activities={activities.filter((a) => a.client_id === detailClient.id)}
+                  payments={payments.filter((p) => p.client_id === detailClient.id)}
+                  tasks={tasks.filter((t) => t.client_id === detailClient.id)}
                   author={session.name}
                   isAdmin={isAdmin}
                   onBack={backToClients}
@@ -251,7 +253,7 @@ export default function Dashboard({ session, onSignOut }) {
             <div style={{ padding: 28 }}>
               {loading ? <Center>Loading your board...</Center> :
                 tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} activities={activities} onNavigate={goTab} onOpenClient={openClient} /> :
-                tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} onAdd={openAddClient} /> :
+                tab === "clients" ? <Clients clients={clients} deliverables={deliverables} payments={payments} tasks={tasks} keywords={keywords} activities={activities} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} onAdd={openAddClient} /> :
                 tab === "tasks" ? <Board clients={clients} tasks={tasks} members={members} onAdd={saveTask} onMove={moveTask} onAssign={assignTask} onDelete={delTask} /> :
                 tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onSave={saveDeliverable} onStatus={statusDeliverable} onDelete={delDeliverable} /> :
                 tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onSave={saveKeyword} onDelete={delKeyword} /> :

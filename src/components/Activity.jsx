@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { StickyNote, Phone, Mail, Users, Trash2, Send, Clock } from "lucide-react";
+import { StickyNote, Phone, Mail, Users, Trash2, Send, Clock, CalendarClock, Check, CalendarPlus } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, btn, input, iconBtn } from "../lib/theme";
 import { ACTIVITY_TYPES, activityLabel } from "../lib/constants";
-import { dateTimeLabel, localDateTimeInput } from "../lib/format";
-import { addActivity, deleteActivity } from "../lib/api";
+import { dateTimeLabel, localDateTimeInput, dateLabel, isPastDue } from "../lib/format";
+import { addActivity, deleteActivity, setActivityFollowup } from "../lib/api";
+import { activitiesIcs, icsEventCount, downloadIcs } from "../lib/ics";
 import { useToast } from "../lib/toast";
 import { Empty } from "./ui";
 
@@ -22,6 +23,7 @@ export default function Activity({ client, activities = [], author = "", onChang
   const [body, setBody] = useState("");
   const [when, setWhen] = useState("");        // datetime-local; blank = now
   const [showWhen, setShowWhen] = useState(false);
+  const [followUp, setFollowUp] = useState(""); // YYYY-MM-DD; blank = no reminder
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const toast = useToast();
@@ -37,8 +39,9 @@ export default function Activity({ client, activities = [], author = "", onChang
           body: body.trim(),
           author,
           happened_at: when ? new Date(when).toISOString() : undefined,
+          follow_up_date: followUp || undefined,
         });
-        setBody(""); setWhen(""); setShowWhen(false); setType("note");
+        setBody(""); setWhen(""); setShowWhen(false); setType("note"); setFollowUp("");
         await onChanged();
         toast("Activity logged");
       } catch (e) {
@@ -58,14 +61,32 @@ export default function Activity({ client, activities = [], author = "", onChang
     })();
   };
 
+  const clearFollowup = (id) => {
+    setBusy(true);
+    (async () => {
+      try { await setActivityFollowup(id, null); await onChanged(); toast("Follow-up cleared"); }
+      catch (e) { toast(e?.message || "Something went wrong.", "error"); }
+      setBusy(false);
+    })();
+  };
+
   return (
     <div style={{ marginTop: 22 }} className="no-print">
-      <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
-        <Clock size={16} /> Activity
-        {activities.length > 0 && (
-          <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>{activities.length}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>
+          <Clock size={16} /> Activity
+          {activities.length > 0 && (
+            <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>{activities.length}</span>
+          )}
+        </h2>
+        {icsEventCount(activities) > 0 && (
+          <button style={{ ...btn("#fff", ink), padding: "8px 12px", fontSize: 12.5 }}
+            title="Download follow-ups & meetings as a calendar file"
+            onClick={() => downloadIcs(`${(client.name || "client").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-calendar.ics`, activitiesIcs(activities, new Map([[client.id, client.name]])))}>
+            <CalendarPlus size={15} /> Add to calendar
+          </button>
         )}
-      </h2>
+      </div>
 
       {err && <div style={{ background: tint, border: BDt, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
 
@@ -100,6 +121,11 @@ export default function Activity({ client, activities = [], author = "", onChang
               <Clock size={14} /> Backdate
             </button>
           )}
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, fontWeight: 800, color: followUp ? accent : "#6b6580" }}>
+            <CalendarClock size={14} /> Follow-up
+            <input type="date" style={{ ...input, flex: "0 0 auto", width: "auto", padding: "8px 10px" }} aria-label="Follow-up reminder date"
+              value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
+          </label>
           <button style={{ ...btn(accent, "#fff"), marginLeft: "auto" }} disabled={busy} onClick={log}>
             <Send size={15} /> {busy ? "Saving…" : "Log activity"}
           </button>
@@ -126,6 +152,14 @@ export default function Activity({ client, activities = [], author = "", onChang
                     </span>
                   </div>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: "#332f45", whiteSpace: "pre-wrap", wordBreak: "break-word", marginTop: 3 }}>{a.body}</div>
+                  {a.follow_up_date && (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 7, padding: "3px 9px", borderRadius: 7, border: BDt, fontSize: 11.5, fontWeight: 800, background: isPastDue(a.follow_up_date) ? "#f7dede" : tint, color: isPastDue(a.follow_up_date) ? "#c0392b" : ink }}>
+                      <CalendarClock size={13} />
+                      Follow up {dateLabel(a.follow_up_date)}{isPastDue(a.follow_up_date) ? " · overdue" : ""}
+                      <button title="Mark follow-up done" aria-label="Mark follow-up done" disabled={busy} onClick={() => clearFollowup(a.id)}
+                        style={{ display: "flex", background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, marginLeft: 2 }}><Check size={14} /></button>
+                    </div>
+                  )}
                 </div>
                 <button style={iconBtn} title="Remove" aria-label="Remove activity" disabled={busy} onClick={() => remove(a.id)}><Trash2 size={14} /></button>
               </div>

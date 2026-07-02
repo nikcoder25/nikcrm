@@ -11,6 +11,9 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Overview**: a home dashboard with rollup KPIs (clients, open tasks, deliverables delivered/overdue, MRR + collected, avg keyword rank), a **client-status breakdown** bar, a **"Needs attention"** list of everything overdue, and a **"Recent activity"** feed of the latest client touchpoints
 - **Quick-jump search** (**⌘K / Ctrl-K** from anywhere, or the sidebar Search button): fuzzy-search every client and jump straight to their page, or hop to any section — keyboard-first (↑/↓/Enter/Esc)
 - **Activity timeline**: inside each client's detail view, log every touchpoint — **note, call, email, or meeting** — with the author and a timestamp you can backdate. The newest interactions surface on the Overview's "Recent activity" feed, turning the board into a real relationship record
+- **Follow-up reminders**: attach a **next-follow-up date** to any logged activity. Overdue and due-today follow-ups show up on the Overview's "Needs attention" list (click straight through to the client) and as a badge on the timeline entry; mark one done with a click
+- **Client health score**: every client gets a computed **0–100 health score** (Healthy / Watch / At risk) from money owed, overdue & blocked work, keyword momentum, overdue follow-ups, and how recently they were engaged. Shown as a badge on the client list, the detail page, and filterable by health
+- **Add to calendar (.ics)**: export a client's follow-ups and meetings as a standard **calendar file** that imports into Google / Apple / Outlook Calendar — one-way, no account connection needed
 - **Team login** with one shared password (set an optional second password for admins)
 - **Roles**: admins can delete clients; everyone else can do everything else
 - **Clients**: add, edit, delete — status, source, package, team, dates, notes, monthly fee
@@ -88,9 +91,11 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
     ├── App.jsx             Top-level: login vs. dashboard
     ├── lib/                Non-UI modules
     │   ├── api.js          Talks to /api/data + stores the session
-    │   ├── constants.js    Statuses, sources, task types, pay states
-    │   ├── format.js       money / month helpers
+    │   ├── constants.js    Statuses, sources, task types, pay states, activity types
+    │   ├── format.js       money / month / date-time helpers
     │   ├── csv.js          CSV export builders + download
+    │   ├── ics.js          iCalendar (.ics) export for follow-ups & meetings
+    │   ├── health.js       Client health score (0–100) computation
     │   ├── scope.js        Retainer scope vs delivered logic
     │   └── theme.js        Colors, borders, shared style tokens, global CSS
     └── components/         One file per screen / shared UI

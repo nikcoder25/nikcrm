@@ -140,8 +140,12 @@ async function ensureSchema(sql) {
     body text default '',
     author text default '',
     happened_at timestamptz default now(),
+    follow_up_date date,                      -- optional "next touch" reminder; null once done
     created_at timestamptz default now()
   )`;
+  // follow_up_date was added after the first activities release; add it for
+  // installs whose table predates it.
+  await sql`alter table activities add column if not exists follow_up_date date`;
   // Deliverables are attributed to a calendar month so they can be matched to
   // the retainer scope by type + month. Older rows may predate this column.
   await sql`alter table deliverables add column if not exists month text default ''`;
@@ -272,7 +276,7 @@ export default async (req) => {
           sql`select id, client_id, period, summary, updated_at from client_reports`,
           sql`select id, client_id, type, quantity from client_retainers`,
           sql`select id, name, role, email from team_members order by name asc`,
-          sql`select id, client_id, type, body, author, happened_at from activities order by happened_at desc`,
+          sql`select id, client_id, type, body, author, happened_at, follow_up_date from activities order by happened_at desc`,
         ]);
         return json({ clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, team_members, activities });
       }
@@ -531,8 +535,18 @@ export default async (req) => {
         if (!a.body || !a.body.trim()) return json({ error: "Write something to log." }, 400);
         const type = ["note", "call", "email", "meeting"].includes(a.type) ? a.type : "note";
         const happenedAt = a.happened_at ? new Date(a.happened_at).toISOString() : new Date().toISOString();
-        await sql`insert into activities (client_id, type, body, author, happened_at)
-          values (${a.client_id}, ${type}, ${a.body.trim()}, ${a.author || ""}, ${happenedAt})`;
+        const followUp = a.follow_up_date ? String(a.follow_up_date).slice(0, 10) : null;
+        await sql`insert into activities (client_id, type, body, author, happened_at, follow_up_date)
+          values (${a.client_id}, ${type}, ${a.body.trim()}, ${a.author || ""}, ${happenedAt}, ${followUp})`;
+        return json({ ok: true });
+      }
+
+      case "activityFollowupSet": {
+        // Set or clear (null) the follow-up reminder on an existing activity.
+        const a = payload;
+        if (!a.id) return json({ error: "Missing activity id." }, 400);
+        const followUp = a.follow_up_date ? String(a.follow_up_date).slice(0, 10) : null;
+        await sql`update activities set follow_up_date=${followUp} where id=${a.id}`;
         return json({ ok: true });
       }
 

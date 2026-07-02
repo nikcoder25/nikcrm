@@ -145,6 +145,7 @@ create table if not exists activities (
   body text default '',
   author text default '',
   happened_at timestamptz default now(),
+  follow_up_date date,                      -- optional "next touch" reminder; null once done
   created_at timestamptz default now()
 );
 

@@ -8,6 +8,14 @@ export const todayStr = () => { const d = new Date(); return `${d.getFullYear()}
 // A date is past due when it's a real date strictly before today.
 export const isPastDue = (dateStr) => Boolean(dateStr) && String(dateStr).slice(0, 10) < todayStr();
 
+// A plain calendar date 'YYYY-MM-DD' → "Jul 2, 2026" (parsed as local, no TZ shift).
+export const dateLabel = (s) => {
+  if (!s) return "";
+  const [y, m, d] = String(s).slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return new Date(y, m - 1, d).toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" });
+};
+
 // A short, human date-time for the activity timeline: e.g. "Jul 2, 2026, 3:14 PM".
 export const dateTimeLabel = (s) => {
   if (!s) return "";

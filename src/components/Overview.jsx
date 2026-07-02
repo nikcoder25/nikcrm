@@ -1,7 +1,7 @@
 import React from "react";
 import { FolderKanban, CheckSquare, ClipboardList, DollarSign, Search, AlertTriangle, Clock } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt } from "../lib/theme";
-import { money, ym, isPastDue, timeAgo } from "../lib/format";
+import { money, ym, isPastDue, timeAgo, todayStr } from "../lib/format";
 import { typeLabel, deliverableStatusLabel, STATUSES, STATUS_LABEL, activityLabel } from "../lib/constants";
 import { Panel, Empty, RevCard } from "./ui";
 import { keywordSummary } from "./Keywords";
@@ -24,6 +24,7 @@ export default function Overview({ clients, tasks, deliverables, payments, keywo
   const deliveredCount = deliverables.filter((d) => d.status === "delivered").length;
 
   const month = ym(new Date());
+  const today10 = todayStr();
   const now = new Date();
   const nextMonth = ym(new Date(now.getFullYear(), now.getMonth() + 1, 1));
   const mrr = activeClients.reduce((s, c) => s + (Number(c.fee) || 0), 0);
@@ -42,6 +43,9 @@ export default function Overview({ clients, tasks, deliverables, payments, keywo
   const recentActivity = [...activities]
     .sort((a, b) => String(b.happened_at).localeCompare(String(a.happened_at)))
     .slice(0, 8);
+
+  // Follow-ups that are due today or overdue — a client owed a next touch.
+  const dueFollowups = activities.filter((a) => a.follow_up_date && String(a.follow_up_date).slice(0, 10) <= today10);
 
   const dueDeliverables = deliverables.filter(overdueDeliverable);
   const dueTasks = tasks.filter(overdueTask);
@@ -65,9 +69,16 @@ export default function Overview({ clients, tasks, deliverables, payments, keywo
     ...blocked.map((d) => ({ id: `b-${d.id}`, kind: "Blocked", title: d.title || typeLabel(d.type), client: nameOf(d.client_id), tag: "Blocked", note: "Needs unblocking", sortKey: "2-" })),
     ...renewals.map((c) => ({ id: `r-${c.id}`, kind: "Renewal", title: `${c.name} renews`, client: c.name, tag: c.renewal_month === month ? "This month" : "Next month", note: `Renews ${c.renewal_month}`, sortKey: `3-${c.renewal_month}` })),
     ...scopeCreep.map((r) => ({ id: `s-${r.id}`, kind: "Scope", title: `Over scope: ${typeLabel(r.type)}`, client: r.client, tag: `${r.delivered}/${r.included}`, note: `Over +${r.delta}`, sortKey: "4-" })),
+    ...dueFollowups.map((a) => ({ id: `f-${a.id}`, kind: "Follow-up", title: a.body, client: nameOf(a.client_id), clientId: a.client_id, tag: activityLabel(a.type), note: isPastDue(a.follow_up_date) ? "Overdue" : "Due today", sortKey: `0-${a.follow_up_date}` })),
   ].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
 
   const KIND_TAB = { Deliverable: "deliverables", Blocked: "deliverables", Task: "tasks", Payment: "revenue", Renewal: "clients", Scope: "clients" };
+  // Route an attention row: follow-ups open the client page; everything else
+  // jumps to the relevant tab.
+  const openAttention = (a) => {
+    if (a.clientId && onOpenClient) { const c = clientOf(a.clientId); if (c) { onOpenClient(c); return; } }
+    go(KIND_TAB[a.kind] || "overview");
+  };
 
   return (
     <div>
@@ -118,7 +129,7 @@ export default function Overview({ clients, tasks, deliverables, payments, keywo
             <Empty>All caught up — nothing overdue, blocked, renewing, or over scope. 🎉</Empty>
           ) : (
             attention.map((a) => (
-              <button key={a.id} onClick={() => go(KIND_TAB[a.kind] || "overview")}
+              <button key={a.id} onClick={() => openAttention(a)}
                 style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 20px", flexWrap: "wrap", width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: "2px solid #f0ece2", cursor: "pointer", font: "inherit", color: "inherit" }}>
                 <span style={{ fontSize: 10.5, fontWeight: 800, padding: "4px 9px", borderRadius: 7, border: BDt, textTransform: "uppercase", background: tint, minWidth: 90, textAlign: "center" }}>{a.kind}</span>
                 <div style={{ flex: 1, minWidth: 160 }}>
