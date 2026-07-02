@@ -4,6 +4,13 @@ Senior-dev review of the deployed app (growth-atlas-app.netlify.app) and codebas
 research on what SEO-agency management tools ship in 2026. Each item below is written as a
 self-contained brief a junior developer can pick up: scope, files, and acceptance criteria.
 
+> **Implementation status (July 2026):** DONE on this branch — all of P0; P1.1 client portal;
+> P1.3 Serpfox-style keyword tracking + DataForSEO auto-checks; P1.4 scheduled report emails;
+> P1.5 Stripe payment links; P2.2 activity log; P2.4 overdue digest; P2.5 drag-and-drop kanban;
+> keyword-history loading capped (part of P2.3). REMAINING — P1.2 Google Search Console
+> integration, P2.1 per-user accounts, P2.3 full per-entity refresh, recurring deliverable
+> templates, and the P3 ideas.
+
 **What we have today:** Overview KPIs + "needs attention", Clients (+ detail page, resources,
 file uploads), kanban Task Board, Deliverables, Retainer/scope tracking, manual Keyword rank
 tracking with history chart, Revenue/MRR + payment tracker, Team workload view, printable
