@@ -107,6 +107,16 @@ export const deleteDeliverable = (id) => call("deliverableDelete", { id });
 // { client_id, month } or { all: true, month }; returns { ok, created }.
 export const generateMonthDeliverables = (p) => call("deliverablesGenerateMonth", p);
 
+/* ---------------- backlinks (link building tracker) ---------------- */
+export const createBacklink = (b) => call("backlinkCreate", b);
+export const updateBacklink = (b) => call("backlinkUpdate", b);
+export const deleteBacklink = (id) => call("backlinkDelete", { id });
+
+/* ---------------- AI visibility (AEO citation tracking) ---------------- */
+export const createAiCitation = (c) => call("aiCitationCreate", c);
+export const updateAiCitation = (c) => call("aiCitationUpdate", c);
+export const deleteAiCitation = (id) => call("aiCitationDelete", { id });
+
 /* ---------------- keywords (rank tracking) ---------------- */
 export const createKeyword = (k) => call("keywordCreate", k);
 export const updateKeyword = (k) => call("keywordUpdate", k);

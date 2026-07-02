@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Pencil, Trash2, Paperclip, Link2, FileText, Upload, ExternalLink, Search, Plus, Share2, Copy, RefreshCw, Mail, BarChart3 } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, SH, SHs, btn, iconBtn, input, lbl } from "../lib/theme";
-import { STATUS_LABEL } from "../lib/constants";
+import { STATUS_LABEL, backlinkStatusLabel } from "../lib/constants";
 import { money } from "../lib/format";
 import { portalPath } from "../lib/router";
 import {
@@ -208,7 +208,7 @@ function Detail({ label, value }) {
 
 // onChanged(...sets) asks the Dashboard to re-fetch: pass the dataset names the
 // mutation touched (e.g. "resources") for a narrow refresh, no args for a full one.
-export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], retainers = [], isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
+export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], backlinks = [], aiCitations = [], reports = [], retainers = [], isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -306,6 +306,8 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
   };
 
   const kstats = keywordSummary(keywords);
+  const liveLinks = backlinks.filter((b) => b.status === "live").length;
+  const recentLinks = backlinks.slice(0, 5); // already newest-first from the API
 
   return (
     <>
@@ -462,11 +464,45 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
           </div>
         </div>
 
+        <div style={{ marginTop: 22 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>
+              <Link2 size={16} /> Backlinks
+            </div>
+            {backlinks.length > 0 && (
+              <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>
+                {liveLinks} live / {backlinks.length} total
+              </span>
+            )}
+          </div>
+          {backlinks.length === 0 ? (
+            <Empty>No backlinks tracked yet. Add them from the Backlinks tab.</Empty>
+          ) : (
+            <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
+              {recentLinks.map((b) => (
+                <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: "1px solid #f0ece2" }}>
+                  {b.url ? (
+                    <a href={b.url} target="_blank" rel="noopener noreferrer" title={b.url}
+                      style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 800, color: ink, textDecoration: "none", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                      {String(b.url).replace(/^https?:\/\//, "")}
+                    </a>
+                  ) : (
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 800, color: "#a39db5" }}>{b.anchor_text || "(no URL)"}</span>
+                  )}
+                  <span style={{ fontSize: 10.5, fontWeight: 800, padding: "3px 9px", borderRadius: 7, border: BDt, textTransform: "uppercase", background: b.status === "live" ? "#d7f5df" : b.status === "lost" ? "#f7dede" : tint }}>
+                    {backlinkStatusLabel(b.status)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <GscPanel client={client} />
 
         <ClientScope client={client} retainers={retainers} deliverables={deliverables} onChanged={onChanged} />
 
-        <ClientReport client={client} keywords={keywords} deliverables={deliverables} reports={reports} retainers={retainers} onChanged={onChanged} />
+        <ClientReport client={client} keywords={keywords} deliverables={deliverables} backlinks={backlinks} aiCitations={aiCitations} reports={reports} retainers={retainers} onChanged={onChanged} />
 
         <button className="no-print" style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 22, justifyContent: "center" }} onClick={() => onEdit(client)}>
           <Pencil size={15} /> Edit client details

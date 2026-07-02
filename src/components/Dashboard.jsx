@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History } from "lucide-react";
+import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles } from "lucide-react";
 import * as api from "../lib/api";
 import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
@@ -10,7 +10,9 @@ import Activity from "./Activity";
 import Clients from "./Clients";
 import Board from "./Board";
 import Deliverables from "./Deliverables";
+import Backlinks from "./Backlinks";
 import Keywords from "./Keywords";
+import AiVisibility from "./AiVisibility";
 import Revenue from "./Revenue";
 import Team from "./Team";
 import ClientForm from "./ClientForm";
@@ -23,8 +25,11 @@ export default function Dashboard({ session, onSignOut }) {
   const [payments, setPayments] = useState([]);
   const [resources, setResources] = useState([]);
   const [deliverables, setDeliverables] = useState([]);
+  const [backlinks, setBacklinks] = useState([]);
   const [keywords, setKeywords] = useState([]);
   const [keywordHistory, setKeywordHistory] = useState([]);
+  const [aiCitations, setAiCitations] = useState([]);
+  const [, setAiCitationHistory] = useState([]);
   const [reports, setReports] = useState([]);
   const [retainers, setRetainers] = useState([]);
   const [activity, setActivity] = useState([]);
@@ -62,8 +67,11 @@ export default function Dashboard({ session, onSignOut }) {
     payments: setPayments,
     resources: setResources,
     deliverables: setDeliverables,
+    backlinks: setBacklinks,
     keywords: setKeywords,
     keyword_history: setKeywordHistory,
+    ai_citations: setAiCitations,
+    ai_citation_history: setAiCitationHistory,
     client_reports: setReports,
     client_retainers: setRetainers,
     activity: setActivity,
@@ -136,6 +144,10 @@ export default function Dashboard({ session, onSignOut }) {
   const delDeliverable = (id) => { if (window.confirm("Delete this deliverable?")) run(() => api.deleteDeliverable(id), ["deliverables"]); };
   // Top up this month's deliverables to every active client's retainer scope.
   const generateDeliverables = () => run(() => api.generateMonthDeliverables({ all: true, month: ym(new Date()) }), ["deliverables"]);
+  const createBacklink = (b) => run(() => api.createBacklink({ ...b, created_by: session.name }), ["backlinks"]);
+  const delBacklink = (id) => { if (window.confirm("Delete this backlink?")) run(() => api.deleteBacklink(id), ["backlinks"]); };
+  const createAiCitation = (c) => run(() => api.createAiCitation(c), ["ai_citations", "ai_citation_history"]);
+  const delAiCitation = (id) => { if (window.confirm("Delete this prompt and its check history?")) run(() => api.deleteAiCitation(id), ["ai_citations", "ai_citation_history"]); };
   const createKeyword = (k) => run(() => api.createKeyword(k), ["keywords", "keyword_history"]);
   const updateKeyword = (k) => run(() => api.updateKeyword(k), ["keywords", "keyword_history"]);
   const delKeyword = (id) => { if (window.confirm("Delete this keyword and its rank history?")) run(() => api.deleteKeyword(id), ["keywords", "keyword_history"]); };
@@ -153,6 +165,14 @@ export default function Dashboard({ session, onSignOut }) {
   const updateDeliverable = (d) => {
     setDeliverables((ds) => ds.map((x) => (x.id === d.id ? { ...x, ...d } : x)));
     run(() => api.updateDeliverable(d), ["deliverables"]);
+  };
+  const updateBacklink = (b) => {
+    setBacklinks((bs) => bs.map((x) => (x.id === b.id ? { ...x, ...b } : x)));
+    run(() => api.updateBacklink(b), ["backlinks"]);
+  };
+  const updateAiCitation = (c) => {
+    setAiCitations((cs) => cs.map((x) => (x.id === c.id ? { ...x, ...c } : x)));
+    run(() => api.updateAiCitation(c), ["ai_citations", "ai_citation_history"]);
   };
   const starKeyword = (id, starred) => {
     setKeywords((ks) => ks.map((k) => (k.id === id ? { ...k, starred } : k)));
@@ -172,7 +192,9 @@ export default function Dashboard({ session, onSignOut }) {
     { k: "clients", l: "Clients", i: FolderKanban },
     { k: "tasks", l: "Task Board", i: CheckSquare },
     { k: "deliverables", l: "Deliverables", i: ClipboardList },
+    { k: "backlinks", l: "Backlinks", i: Link2 },
     { k: "keywords", l: "Keywords", i: Search },
+    { k: "ai", l: "AI Visibility", i: Sparkles },
     { k: "revenue", l: "Revenue", i: DollarSign },
     { k: "activity", l: "Activity", i: History },
     { k: "team", l: "Team", i: Users },
@@ -226,6 +248,8 @@ export default function Dashboard({ session, onSignOut }) {
                   keywords={keywords.filter((k) => k.client_id === detailClient.id)}
                   keywordHistory={keywordHistory}
                   deliverables={deliverables.filter((d) => d.client_id === detailClient.id)}
+                  backlinks={backlinks.filter((b) => b.client_id === detailClient.id)}
+                  aiCitations={aiCitations.filter((c) => c.client_id === detailClient.id)}
                   reports={reports.filter((r) => r.client_id === detailClient.id)}
                   retainers={retainers.filter((r) => r.client_id === detailClient.id)}
                   isAdmin={isAdmin}
@@ -258,7 +282,9 @@ export default function Dashboard({ session, onSignOut }) {
                 tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
                 tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
                 tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} onGenerate={generateDeliverables} /> :
+                tab === "backlinks" ? <Backlinks clients={clients} backlinks={backlinks} onCreate={createBacklink} onUpdate={updateBacklink} onDelete={delBacklink} /> :
                 tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
+                tab === "ai" ? <AiVisibility clients={clients} citations={aiCitations} onCreate={createAiCitation} onUpdate={updateAiCitation} onDelete={delAiCitation} /> :
                 tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
                 tab === "activity" ? <Activity items={activity} clients={clients} /> :
                 <Team clients={clients} tasks={tasks} />}

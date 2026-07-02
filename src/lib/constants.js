@@ -24,3 +24,24 @@ export const DELIVERABLE_STATES = [
   { key: "blocked", label: "Blocked" },
 ];
 export const deliverableStatusLabel = (k) => (DELIVERABLE_STATES.find((s) => s.key === k) || DELIVERABLE_STATES[0]).label;
+
+// Backlinks: lifecycle of a link-building placement.
+export const BACKLINK_STATES = [
+  { key: "prospect", label: "Prospect" },
+  { key: "outreach", label: "Outreach" },
+  { key: "placed", label: "Placed" },
+  { key: "live", label: "Live" },
+  { key: "lost", label: "Lost" },
+];
+export const backlinkStatusLabel = (k) => (BACKLINK_STATES.find((s) => s.key === k) || BACKLINK_STATES[3]).label;
+
+// AI answer engines tracked by the AI-visibility (AEO) module.
+export const AI_ENGINES = [
+  { key: "chatgpt", label: "ChatGPT" },
+  { key: "perplexity", label: "Perplexity" },
+  { key: "google_ai", label: "Google AI Overviews" },
+  { key: "claude", label: "Claude" },
+  { key: "gemini", label: "Gemini" },
+  { key: "other", label: "Other" },
+];
+export const aiEngineLabel = (k) => (AI_ENGINES.find((e) => e.key === k) || AI_ENGINES[5]).label;

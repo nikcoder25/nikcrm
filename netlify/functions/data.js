@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { neon } from "@netlify/neon";
 import { getStore } from "@netlify/blobs";
-import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, typeLabel } from "../../src/lib/constants.js";
+import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, BACKLINK_STATES, AI_ENGINES, typeLabel } from "../../src/lib/constants.js";
 import { lastDayOfMonth } from "../../src/lib/format.js";
 
 // Uploaded client files live in a Netlify Blobs store (auto-available to
@@ -121,6 +121,39 @@ async function ensureSchema(sql) {
     rank integer,
     recorded_at timestamptz default now()
   )`;
+  await sql`create table if not exists backlinks (
+    id uuid primary key default gen_random_uuid(),
+    client_id uuid references clients(id) on delete cascade,
+    url text default '',                     -- the page the link lives on
+    target_url text default '',              -- the client page it points at
+    anchor_text text default '',
+    domain_rating integer,                   -- 0–100; null = unknown
+    status text default 'live',              -- prospect / outreach / placed / live / lost
+    cost numeric default 0,
+    notes text default '',
+    placed_date date,
+    created_by text default '',
+    created_at timestamptz default now()
+  )`;
+  await sql`create table if not exists ai_citations (
+    id uuid primary key default gen_random_uuid(),
+    client_id uuid references clients(id) on delete cascade,
+    prompt text default '',
+    engine text default 'chatgpt',           -- chatgpt / perplexity / google_ai / claude / gemini / other
+    cited boolean,                           -- null = not checked yet
+    position integer,                        -- position within the AI answer's citations
+    url text default '',                     -- the client URL the answer cites
+    checked_at timestamptz,                  -- when cited/position was last recorded
+    notes text default '',
+    created_at timestamptz default now()
+  )`;
+  await sql`create table if not exists ai_citation_history (
+    id uuid primary key default gen_random_uuid(),
+    citation_id uuid references ai_citations(id) on delete cascade,
+    cited boolean,
+    position integer,
+    recorded_at timestamptz default now()
+  )`;
   await sql`create table if not exists client_reports (
     id uuid primary key default gen_random_uuid(),
     client_id uuid references clients(id) on delete cascade,
@@ -205,6 +238,9 @@ async function ensureSchema(sql) {
     sql`create index if not exists idx_keywords_client on keywords (client_id)`,
     sql`create index if not exists idx_keyword_history_kw on keyword_history (keyword_id)`,
     sql`create index if not exists idx_keyword_history_time on keyword_history (recorded_at)`,
+    sql`create index if not exists idx_backlinks_client on backlinks (client_id)`,
+    sql`create index if not exists idx_ai_citations_client on ai_citations (client_id)`,
+    sql`create index if not exists idx_ai_citation_history_cit on ai_citation_history (citation_id)`,
     sql`create index if not exists idx_activity_time on activity (created_at desc)`,
   ]);
   schemaReady = true;
@@ -224,6 +260,13 @@ const DATASET_QUERIES = {
   // The full series comes from the keywordHistory action.
   keyword_history: (sql) => sql`select id, keyword_id, rank, recorded_at from
     (select h.*, row_number() over (partition by keyword_id order by recorded_at desc) rn from keyword_history h) t
+    where rn <= 25 order by recorded_at asc`,
+  backlinks: (sql) => sql`select * from backlinks order by created_at desc`,
+  ai_citations: (sql) => sql`select * from ai_citations order by created_at desc`,
+  // ai_citation_history is unbounded like keyword_history; only ship the last
+  // 25 points per citation.
+  ai_citation_history: (sql) => sql`select id, citation_id, cited, position, recorded_at from
+    (select h.*, row_number() over (partition by citation_id order by recorded_at desc) rn from ai_citation_history h) t
     where rn <= 25 order by recorded_at asc`,
   client_reports: (sql) => sql`select id, client_id, period, summary, updated_at from client_reports`,
   client_retainers: (sql) => sql`select id, client_id, type, quantity from client_retainers`,
@@ -272,6 +315,8 @@ const TASK_TYPE_KEYS = TASK_TYPES.map((t) => t.key);
 const TASK_STATE_KEYS = TASK_STATES.map((s) => s.key);
 const PAY_STATE_KEYS = PAY_STATES.map((s) => s.key);
 const DELIVERABLE_STATE_KEYS = DELIVERABLE_STATES.map((s) => s.key);
+const BACKLINK_STATE_KEYS = BACKLINK_STATES.map((s) => s.key);
+const AI_ENGINE_KEYS = AI_ENGINES.map((e) => e.key);
 const KEYWORD_PLATFORMS = ["desktop", "mobile"];
 function badEnum(field, value, allowed) {
   if (value === undefined || value === null || value === "") return null;
@@ -308,6 +353,20 @@ function toRank(v) {
   if (v === "" || v === null || v === undefined) return null;
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+// Domain rating is 0–100 or null (unknown). Returns undefined when the value
+// is a number outside that range, so callers can reject it with a clear 400.
+function toDomainRating(v) {
+  const n = toRank(v);
+  if (n === null) return null;
+  return n >= 0 && n <= 100 ? n : undefined;
+}
+
+// Cited is a tri-state: true / false / null (not checked yet).
+function toCited(v) {
+  if (v === "" || v === null || v === undefined) return null;
+  return Boolean(v);
 }
 
 // Auth model: a shared team password gates everything. An optional separate
@@ -787,6 +846,54 @@ export default async (req) => {
         return json({ ok: true, created });
       }
 
+      case "backlinkCreate": {
+        const b = payload;
+        if (!b.client_id) return json({ error: "Pick a client for the backlink." }, 400);
+        const bad = badEnum("status", b.status, BACKLINK_STATE_KEYS);
+        if (bad) return bad;
+        const linkUrl = safeHttpUrl(b.url);
+        if (linkUrl === null) return json({ error: "Backlink URL must be an http(s) URL." }, 400);
+        const targetUrl = safeHttpUrl(b.target_url);
+        if (targetUrl === null) return json({ error: "Target URL must be an http(s) URL (or blank)." }, 400);
+        const dr = toDomainRating(b.domain_rating);
+        if (dr === undefined) return json({ error: "Domain rating must be between 0 and 100 (or blank)." }, 400);
+        await sql`insert into backlinks
+          (client_id, url, target_url, anchor_text, domain_rating, status, cost, notes, placed_date, created_by)
+          values (${b.client_id}, ${linkUrl}, ${targetUrl}, ${b.anchor_text || ""}, ${dr},
+                  ${b.status || "live"}, ${Number(b.cost) || 0}, ${b.notes || ""},
+                  ${b.placed_date || null}, ${b.created_by || ""})`;
+        await logActivity(sql, { actor, verb: "added backlink", entity: "backlink", entity_label: linkUrl || b.anchor_text || "", client_id: b.client_id });
+        return json({ ok: true });
+      }
+
+      case "backlinkUpdate": {
+        const b = payload;
+        if (!b.id) return json({ error: "Missing backlink id." }, 400);
+        const bad = badEnum("status", b.status, BACKLINK_STATE_KEYS);
+        if (bad) return bad;
+        const linkUrl = safeHttpUrl(b.url);
+        if (linkUrl === null) return json({ error: "Backlink URL must be an http(s) URL." }, 400);
+        const targetUrl = safeHttpUrl(b.target_url);
+        if (targetUrl === null) return json({ error: "Target URL must be an http(s) URL (or blank)." }, 400);
+        const dr = toDomainRating(b.domain_rating);
+        if (dr === undefined) return json({ error: "Domain rating must be between 0 and 100 (or blank)." }, 400);
+        await sql`update backlinks set
+          url=${linkUrl}, target_url=${targetUrl}, anchor_text=${b.anchor_text || ""},
+          domain_rating=${dr}, status=${b.status || "live"}, cost=${Number(b.cost) || 0},
+          notes=${b.notes || ""}, placed_date=${b.placed_date || null}
+          where id=${b.id}`;
+        await logActivity(sql, { actor, verb: "updated backlink", entity: "backlink", entity_label: linkUrl || b.anchor_text || "", client_id: b.client_id });
+        return json({ ok: true });
+      }
+
+      case "backlinkDelete": {
+        // Not admin-gated — only client deletion is.
+        const blGone = await sql`select url, anchor_text, client_id from backlinks where id=${payload.id} limit 1`;
+        await sql`delete from backlinks where id=${payload.id}`;
+        if (blGone.length) await logActivity(sql, { actor, verb: "deleted backlink", entity: "backlink", entity_label: blGone[0].url || blGone[0].anchor_text || "", client_id: blGone[0].client_id });
+        return json({ ok: true });
+      }
+
       case "keywordCreate": {
         const k = payload;
         if (!k.client_id) return json({ error: "Pick a client for the keyword." }, 400);
@@ -893,6 +1000,66 @@ export default async (req) => {
         const kwGone = await sql`select keyword, client_id from keywords where id=${payload.id} limit 1`;
         await sql`delete from keywords where id=${payload.id}`;
         if (kwGone.length) await logActivity(sql, { actor, verb: "deleted keyword", entity: "keyword", entity_label: kwGone[0].keyword, client_id: kwGone[0].client_id });
+        return json({ ok: true });
+      }
+
+      case "aiCitationCreate": {
+        const c = payload;
+        if (!c.client_id) return json({ error: "Pick a client for the prompt." }, 400);
+        const bad = badEnum("engine", c.engine, AI_ENGINE_KEYS);
+        if (bad) return bad;
+        const citedUrl = safeHttpUrl(c.url);
+        if (citedUrl === null) return json({ error: "Cited URL must be an http(s) URL (or blank)." }, 400);
+        const cited = toCited(c.cited);
+        const position = toRank(c.position);
+        // Stamp checked_at only when a result was actually recorded.
+        const checkedAt = cited == null ? null : new Date().toISOString();
+        const created = await sql`insert into ai_citations
+          (client_id, prompt, engine, cited, position, url, checked_at, notes)
+          values (${c.client_id}, ${c.prompt || ""}, ${c.engine || "chatgpt"}, ${cited},
+                  ${position}, ${citedUrl}, ${checkedAt}, ${c.notes || ""})
+          returning id`;
+        // Record the first check so the history has a starting point.
+        if (cited != null && created.length) {
+          await sql`insert into ai_citation_history (citation_id, cited, position) values (${created[0].id}, ${cited}, ${position})`;
+        }
+        await logActivity(sql, { actor, verb: "added AI prompt", entity: "ai_citation", entity_label: `"${c.prompt || ""}"`, client_id: c.client_id });
+        return json({ ok: true });
+      }
+
+      case "aiCitationUpdate": {
+        const c = payload;
+        if (!c.id) return json({ error: "Missing prompt id." }, 400);
+        const bad = badEnum("engine", c.engine, AI_ENGINE_KEYS);
+        if (bad) return bad;
+        const citedUrl = safeHttpUrl(c.url);
+        if (citedUrl === null) return json({ error: "Cited URL must be an http(s) URL (or blank)." }, 400);
+        const rows = await sql`select cited, position, checked_at from ai_citations where id=${c.id} limit 1`;
+        if (!rows.length) return json({ error: "Prompt not found." }, 404);
+        const existing = rows[0];
+        const cited = toCited(c.cited);
+        const position = toRank(c.position);
+        // Same semantics as keyword ranks: only a real change to the check
+        // result re-stamps checked_at and appends a history point.
+        const changed = (cited ?? null) !== (existing.cited ?? null)
+          || (position ?? null) !== (existing.position ?? null);
+        const checked_at = changed ? new Date().toISOString() : existing.checked_at;
+        await sql`update ai_citations set
+          prompt=${c.prompt || ""}, engine=${c.engine || "chatgpt"}, cited=${cited},
+          position=${position}, url=${citedUrl}, checked_at=${checked_at ?? null}, notes=${c.notes || ""}
+          where id=${c.id}`;
+        if (changed && cited != null) {
+          await sql`insert into ai_citation_history (citation_id, cited, position) values (${c.id}, ${cited}, ${position})`;
+        }
+        await logActivity(sql, { actor, verb: "updated AI prompt", entity: "ai_citation", entity_label: `"${c.prompt || ""}"`, client_id: c.client_id });
+        return json({ ok: true });
+      }
+
+      case "aiCitationDelete": {
+        // Not admin-gated — only client deletion is. History rows cascade.
+        const aiGone = await sql`select prompt, client_id from ai_citations where id=${payload.id} limit 1`;
+        await sql`delete from ai_citations where id=${payload.id}`;
+        if (aiGone.length) await logActivity(sql, { actor, verb: "deleted AI prompt", entity: "ai_citation", entity_label: `"${aiGone[0].prompt}"`, client_id: aiGone[0].client_id });
         return json({ ok: true });
       }
 

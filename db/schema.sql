@@ -121,6 +121,47 @@ create table if not exists keyword_history (
   recorded_at timestamptz default now()
 );
 
+-- Backlinks: per-client link-building tracker (manual entry).
+create table if not exists backlinks (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  url text default '',                     -- the page the link lives on
+  target_url text default '',              -- the client page it points at
+  anchor_text text default '',
+  domain_rating integer,                   -- 0–100; null = unknown
+  status text default 'live',              -- prospect / outreach / placed / live / lost
+  cost numeric default 0,
+  notes text default '',
+  placed_date date,
+  created_by text default '',
+  created_at timestamptz default now()
+);
+
+-- AI visibility (AEO): whether a client gets cited in AI answers (ChatGPT,
+-- Perplexity, Google AI Overviews, Claude, Gemini) for given prompts. Each row
+-- is the CURRENT state per prompt+engine; changes to cited/position append a
+-- history row (same semantics as keyword ranks and keyword_history).
+create table if not exists ai_citations (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  prompt text default '',
+  engine text default 'chatgpt',           -- chatgpt / perplexity / google_ai / claude / gemini / other
+  cited boolean,                           -- null = not checked yet
+  position integer,                        -- position within the AI answer's citations
+  url text default '',                     -- the client URL the answer cites
+  checked_at timestamptz,                  -- when cited/position was last recorded
+  notes text default '',
+  created_at timestamptz default now()
+);
+
+create table if not exists ai_citation_history (
+  id uuid primary key default gen_random_uuid(),
+  citation_id uuid references ai_citations(id) on delete cascade,
+  cited boolean,
+  position integer,
+  recorded_at timestamptz default now()
+);
+
 -- Client monthly reports: the free-text "wins" narrative, one per client per
 -- month. Rankings/deliverables in the report are assembled live from the tables
 -- above; only this narrative is stored.
@@ -198,4 +239,7 @@ create index if not exists idx_deliverables_client on deliverables (client_id);
 create index if not exists idx_keywords_client on keywords (client_id);
 create index if not exists idx_keyword_history_kw on keyword_history (keyword_id);
 create index if not exists idx_keyword_history_time on keyword_history (recorded_at);
+create index if not exists idx_backlinks_client on backlinks (client_id);
+create index if not exists idx_ai_citations_client on ai_citations (client_id);
+create index if not exists idx_ai_citation_history_cit on ai_citation_history (citation_id);
 create index if not exists idx_activity_time on activity (created_at desc);

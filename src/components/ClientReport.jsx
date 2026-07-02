@@ -4,6 +4,7 @@ import { ink, accent, tint, disp, BD, BDt, btn, sel, input } from "../lib/theme"
 import { typeLabel, deliverableStatusLabel } from "../lib/constants";
 import { ym, ymLabel } from "../lib/format";
 import { keywordSummary, movement } from "./Keywords";
+import { aiCitationSummary } from "./AiVisibility";
 import { scopeRows } from "../lib/scope";
 import { saveReport, gscLoad } from "../lib/api";
 import { Empty } from "./ui";
@@ -41,7 +42,7 @@ function vsPrev(cur, prev) {
   return ` (${pct > 0 ? "▲ +" : pct < 0 ? "▼ " : ""}${pct}% vs prev month)`;
 }
 
-export default function ClientReport({ client, keywords = [], deliverables = [], reports = [], retainers = [], onChanged }) {
+export default function ClientReport({ client, keywords = [], deliverables = [], backlinks = [], aiCitations = [], reports = [], retainers = [], onChanged }) {
   const [month, setMonth] = useState(ym(new Date()));
   const savedForMonth = reports.find((r) => r.period === month)?.summary || "";
   const [draft, setDraft] = useState(savedForMonth);
@@ -84,6 +85,9 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
   const ks = keywordSummary(keywords);
   const netImprovement = keywords.reduce((s, k) => (k.current_rank != null && k.previous_rank != null ? s + (Number(k.previous_rank) - Number(k.current_rank)) : s), 0);
   const delivered = deliverables.filter((d) => d.status === "delivered").length;
+  // Backlinks placed in the selected month (by placed_date); section hidden when empty.
+  const placedLinks = backlinks.filter((b) => String(b.placed_date || "").slice(0, 7) === month);
+  const ai = aiCitationSummary(aiCitations);
   const scope = scopeRows(retainers, deliverables, client.id, month);
   const dirty = draft !== savedForMonth;
 
@@ -186,6 +190,47 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
                 </tbody>
               </table>
             )}
+          </div>
+        )}
+
+        {/* Link building — only when backlinks were placed in the selected month */}
+        {placedLinks.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", marginBottom: 8 }}>Link building</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#4b4560", marginBottom: 10 }}>
+              <b>{placedLinks.length}</b> backlink{placedLinks.length === 1 ? "" : "s"} placed in {ymLabel(month)}
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ textAlign: "left", borderBottom: BDt }}>
+                  <th style={{ padding: "6px 8px" }}>URL</th>
+                  <th style={{ padding: "6px 8px" }}>Anchor</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right" }}>DR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {placedLinks.map((b) => (
+                  <tr key={b.id} style={{ borderBottom: "1px solid #f0ece2" }}>
+                    <td style={{ padding: "6px 8px", fontWeight: 700, wordBreak: "break-all" }}>{String(b.url || "").replace(/^https?:\/\//, "") || "—"}</td>
+                    <td style={{ padding: "6px 8px", color: "#6b6580" }}>{b.anchor_text || "—"}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 800 }}>{b.domain_rating == null ? "—" : b.domain_rating}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* AI visibility — only when prompts are tracked for this client */}
+        {aiCitations.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", marginBottom: 8 }}>AI visibility</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#4b4560" }}>
+              Cited in <b>{ai.cited}</b> of <b>{ai.total}</b> tracked prompt{ai.total === 1 ? "" : "s"}
+              {ai.byEngine.length > 0 && (
+                <> · {ai.byEngine.map((e) => `${e.label} ${e.cited}/${e.total}`).join(" · ")}</>
+              )}
+            </div>
           </div>
         )}
 
