@@ -36,7 +36,7 @@ export default function Revenue({ clients, payments, month, setMonth, onSet }) {
         <button style={btn("#fff", ink)} disabled={payments.length === 0} onClick={() => downloadCsv("payments.csv", paymentsCsv(payments, clients))}>
           <Download size={15} /> Export CSV
         </button>
-        <select style={{ ...sel, flex: "none", minWidth: 150 }} value={month} onChange={(e) => setMonth(e.target.value)}>
+        <select style={{ ...sel, flex: "none", minWidth: 150 }} value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Revenue month">
           {months.map((m) => <option key={m} value={m}>{ymLabel(m)}</option>)}
         </select>
       </div>
@@ -48,7 +48,7 @@ export default function Revenue({ clients, payments, month, setMonth, onSet }) {
       </div>
 
       <div style={{ background: "#fff", border: BD, borderRadius: 16, boxShadow: SH, padding: 20, marginBottom: 16 }}>
-        <div style={{ fontFamily: disp, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 12 }}>Revenue by source</div>
+        <h2 style={{ fontFamily: disp, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 12 }}>Revenue by source</h2>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 22 }}>
           {Object.keys(bySource).length === 0 ? <span style={{ color: "#6b6580", fontWeight: 600 }}>No active revenue.</span> :
             Object.entries(bySource).map(([s, v]) => (
@@ -61,7 +61,7 @@ export default function Revenue({ clients, payments, month, setMonth, onSet }) {
       </div>
 
       <Panel>
-        <div style={{ padding: "16px 20px", fontFamily: disp, fontSize: 15, textTransform: "uppercase", borderBottom: BD }}>Payments · {ymLabel(month)}</div>
+        <h2 style={{ padding: "16px 20px", fontFamily: disp, fontSize: 15, textTransform: "uppercase", borderBottom: BD }}>Payments · {ymLabel(month)}</h2>
         {active.length === 0 ? <Empty>No active clients.</Empty> : monthPays.map(({ client, amount, status }) => (
           <div key={client.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", borderBottom: "2px solid #f0ece2" }}>
             <div style={{ flex: 1, minWidth: 0 }}>

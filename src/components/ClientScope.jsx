@@ -5,6 +5,7 @@ import { TASK_TYPES, typeLabel } from "../lib/constants";
 import { ym, ymLabel } from "../lib/format";
 import { scopeRows } from "../lib/scope";
 import { saveRetainer, deleteRetainer } from "../lib/api";
+import { useToast } from "../lib/toast";
 import { Empty } from "./ui";
 
 const STATE = {
@@ -14,11 +15,11 @@ const STATE = {
 };
 
 // Inline editable quantity, saved on blur when changed.
-function ScopeQty({ value, onSave }) {
+function ScopeQty({ value, onSave, label }) {
   const [v, setV] = useState(String(value));
   useEffect(() => setV(String(value)), [value]);
   return (
-    <input type="number" min="0" value={v}
+    <input type="number" min="0" value={v} aria-label={label}
       onChange={(e) => setV(e.target.value)}
       onBlur={() => { const n = Number(v) || 0; if (n !== value) onSave(n); }}
       style={{ ...input, width: 66, padding: "6px 8px", textAlign: "center" }} />
@@ -31,15 +32,21 @@ export default function ClientScope({ client, retainers = [], deliverables = [],
   const [addQty, setAddQty] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const toast = useToast();
 
   const rows = scopeRows(retainers, deliverables, client.id, month);
   const usedTypes = new Set(retainers.filter((r) => r.client_id === client.id).map((r) => r.type));
   const available = TASK_TYPES.filter((t) => !usedTypes.has(t.key));
 
-  const guard = async (fn) => { setErr(""); setBusy(true); try { await fn(); } catch (e) { setErr(e?.message || "Something went wrong."); } setBusy(false); };
-  const add = () => { if (!addType) return; guard(async () => { await saveRetainer(client.id, addType, Number(addQty) || 0); setAddType(""); setAddQty(""); onChanged(); }); };
-  const setQty = (type, qty) => guard(async () => { await saveRetainer(client.id, type, qty); onChanged(); });
-  const remove = (id) => guard(async () => { await deleteRetainer(id); onChanged(); });
+  const guard = async (fn, okMsg) => {
+    setErr(""); setBusy(true);
+    try { await fn(); if (okMsg) toast(okMsg); }
+    catch (e) { setErr(e?.message || "Something went wrong."); toast(e?.message || "Something went wrong.", "error"); }
+    setBusy(false);
+  };
+  const add = () => { if (!addType) return; guard(async () => { await saveRetainer(client.id, addType, Number(addQty) || 0); setAddType(""); setAddQty(""); onChanged(); }, "Scope added"); };
+  const setQty = (type, qty) => guard(async () => { await saveRetainer(client.id, type, qty); onChanged(); }, "Scope updated");
+  const remove = (id) => guard(async () => { await deleteRetainer(id); onChanged(); }, "Scope removed");
 
   const months = (() => {
     const set = new Set([month]); const now = new Date();
@@ -50,10 +57,10 @@ export default function ClientScope({ client, retainers = [], deliverables = [],
   return (
     <div style={{ marginTop: 22 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>
+        <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>
           Scope / retainer
-        </div>
-        <select style={{ ...sel, flex: "none", minWidth: 140 }} value={month} onChange={(e) => setMonth(e.target.value)}>
+        </h2>
+        <select style={{ ...sel, flex: "none", minWidth: 140 }} value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Scope month">
           {months.map((m) => <option key={m} value={m}>{ymLabel(m)}</option>)}
         </select>
       </div>
@@ -69,12 +76,12 @@ export default function ClientScope({ client, retainers = [], deliverables = [],
               <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: "1px solid #f0ece2", flexWrap: "wrap" }}>
                 <span style={{ flex: 1, minWidth: 110, fontWeight: 800, fontSize: 13.5 }}>{typeLabel(r.type)}</span>
                 <span style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 700 }}>Included</span>
-                <ScopeQty value={r.included} onSave={(q) => setQty(r.type, q)} />
+                <ScopeQty value={r.included} onSave={(q) => setQty(r.type, q)} label={`Included ${typeLabel(r.type)} per month`} />
                 <span style={{ fontSize: 13, fontWeight: 800, minWidth: 82, textAlign: "right" }}>{r.delivered} delivered</span>
                 <span style={{ fontSize: 11, fontWeight: 800, color: s.color, background: s.bg, border: BDt, borderRadius: 7, padding: "3px 9px", minWidth: 92, textAlign: "center" }}>
                   {r.state === "over" ? `Over +${r.delta}` : r.state === "complete" ? "Complete" : `${Math.max(0, -r.delta)} to go`}
                 </span>
-                <button style={iconBtn} title="Remove" disabled={busy} onClick={() => remove(r.id)}><Trash2 size={15} /></button>
+                <button style={iconBtn} title="Remove" aria-label={`Remove ${typeLabel(r.type)} from scope`} disabled={busy} onClick={() => remove(r.id)}><Trash2 size={15} /></button>
               </div>
             );
           })}
@@ -83,11 +90,11 @@ export default function ClientScope({ client, retainers = [], deliverables = [],
 
       {available.length > 0 && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <select style={{ ...sel, flex: 1, minWidth: 140 }} value={addType} onChange={(e) => setAddType(e.target.value)}>
+          <select style={{ ...sel, flex: 1, minWidth: 140 }} value={addType} onChange={(e) => setAddType(e.target.value)} aria-label="Scope type to add">
             <option value="">Add a scope type…</option>
             {available.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
           </select>
-          <input type="number" min="0" style={{ ...input, width: 90 }} placeholder="Qty/mo" value={addQty} onChange={(e) => setAddQty(e.target.value)} />
+          <input type="number" min="0" style={{ ...input, width: 90 }} placeholder="Qty/mo" value={addQty} onChange={(e) => setAddQty(e.target.value)} aria-label="Included quantity per month" />
           <button style={btn(accent, "#fff")} disabled={busy || !addType} onClick={add}><Plus size={15} /> Add</button>
         </div>
       )}

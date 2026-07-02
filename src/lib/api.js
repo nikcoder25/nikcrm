@@ -46,6 +46,7 @@ export const saveClient = (c) => call("clientSave", c);
 export const deleteClient = (id) => call("clientDelete", { id });
 export const addTask = (t) => call("taskAdd", t);
 export const moveTask = (id, status) => call("taskMove", { id, status });
+export const assignTask = (id, assignee) => call("taskAssign", { id, assignee });
 export const deleteTask = (id) => call("taskDelete", { id });
 export const setPayment = (client_id, month, patch) => call("paymentSet", { client_id, month, ...patch });
 
@@ -109,3 +110,8 @@ export const deleteReport = (id) => call("reportDelete", { id });
 /* ---------------- retainers (agreed monthly scope per client) ---------------- */
 export const saveRetainer = (client_id, type, quantity) => call("retainerSave", { client_id, type, quantity });
 export const deleteRetainer = (id) => call("retainerDelete", { id });
+
+/* ---------------- team members (assignee roster) ---------------- */
+export const createMember = (m) => call("teamAdd", m);
+export const updateMember = (m) => call("teamUpdate", m);
+export const deleteMember = (id) => call("teamDelete", { id });
