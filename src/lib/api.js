@@ -97,10 +97,14 @@ export const createDeliverable = (d) => call("deliverableCreate", d);
 export const updateDeliverable = (d) => call("deliverableUpdate", d);
 export const deleteDeliverable = (id) => call("deliverableDelete", { id });
 
-/* ---------------- keywords (manual rank tracking) ---------------- */
+/* ---------------- keywords (rank tracking) ---------------- */
 export const createKeyword = (k) => call("keywordCreate", k);
 export const updateKeyword = (k) => call("keywordUpdate", k);
 export const deleteKeyword = (id) => call("keywordDelete", { id });
+// Bulk add: { client_id, target_url, keywords: [...], search_engine, location, platform }
+export const bulkAddKeywords = (p) => call("keywordsBulkAdd", p);
+export const bulkDeleteKeywords = (ids) => call("keywordsBulkDelete", { ids });
+export const starKeyword = (id, starred) => call("keywordStar", { id, starred });
 
 /* ---------------- monthly reports (per-client narrative) ---------------- */
 export const saveReport = (client_id, period, summary) => call("reportSave", { client_id, period, summary });

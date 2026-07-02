@@ -76,8 +76,9 @@ create table if not exists deliverables (
   created_at timestamptz default now()
 );
 
--- Keywords: manual keyword-rank tracking per client. On each rank change the
--- API rolls current_rank into previous_rank so movement stays meaningful.
+-- Keywords: keyword-rank tracking per client (manual edits + optional scheduled
+-- DataForSEO checks). On each rank change the API rolls current_rank into
+-- previous_rank so movement stays meaningful.
 create table if not exists keywords (
   id uuid primary key default gen_random_uuid(),
   client_id uuid references clients(id) on delete cascade,
@@ -89,6 +90,16 @@ create table if not exists keywords (
   notes text default '',
   created_at timestamptz default now()
 );
+
+-- Serpfox-style tracking metadata, added after the initial release. Kept as
+-- ALTERs (mirroring netlify/functions/data.js) so existing databases upgrade
+-- in place with no manual step.
+alter table keywords add column if not exists search_engine text default 'www.google.com';
+alter table keywords add column if not exists location text default '';         -- e.g. "Washington, United States"
+alter table keywords add column if not exists platform text default 'desktop';  -- 'desktop' | 'mobile'
+alter table keywords add column if not exists volume integer;                   -- monthly search volume (manual entry)
+alter table keywords add column if not exists starred boolean default false;
+alter table keywords add column if not exists auto_track boolean default false; -- include in scheduled DataForSEO checks
 
 -- Keyword rank history: one row appended each time a keyword's rank changes to a
 -- real value (on create and on rank-changing updates). Powers the trend chart.

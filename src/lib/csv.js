@@ -63,6 +63,11 @@ export const keywordsCsv = (keywords, clients) => {
     { header: "Current Rank", value: (k) => (k.current_rank == null ? "" : k.current_rank) },
     { header: "Previous Rank", value: (k) => (k.previous_rank == null ? "" : k.previous_rank) },
     { header: "Target URL", value: (k) => k.target_url },
+    { header: "Volume", value: (k) => (k.volume == null ? "" : k.volume) },
+    { header: "Search Engine", value: (k) => k.search_engine || "" },
+    { header: "Location", value: (k) => k.location || "" },
+    { header: "Platform", value: (k) => k.platform || "" },
+    { header: "Starred", value: (k) => (k.starred ? "yes" : "") },
     { header: "Checked At", value: (k) => (k.checked_at ? String(k.checked_at).slice(0, 10) : "") },
     { header: "Notes", value: (k) => k.notes },
   ]);

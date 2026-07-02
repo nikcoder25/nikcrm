@@ -98,6 +98,14 @@ async function ensureSchema(sql) {
     notes text default '',
     created_at timestamptz default now()
   )`;
+  // Serpfox-style tracking metadata, added after the initial release. ALTER ...
+  // IF NOT EXISTS keeps existing databases upgrading in place with no manual step.
+  await sql`alter table keywords add column if not exists search_engine text default 'www.google.com'`;
+  await sql`alter table keywords add column if not exists location text default ''`;
+  await sql`alter table keywords add column if not exists platform text default 'desktop'`;
+  await sql`alter table keywords add column if not exists volume integer`;
+  await sql`alter table keywords add column if not exists starred boolean default false`;
+  await sql`alter table keywords add column if not exists auto_track boolean default false`;
   await sql`create table if not exists keyword_history (
     id uuid primary key default gen_random_uuid(),
     keyword_id uuid references keywords(id) on delete cascade,
@@ -165,6 +173,7 @@ const TASK_TYPE_KEYS = TASK_TYPES.map((t) => t.key);
 const TASK_STATE_KEYS = TASK_STATES.map((s) => s.key);
 const PAY_STATE_KEYS = PAY_STATES.map((s) => s.key);
 const DELIVERABLE_STATE_KEYS = DELIVERABLE_STATES.map((s) => s.key);
+const KEYWORD_PLATFORMS = ["desktop", "mobile"];
 function badEnum(field, value, allowed) {
   if (value === undefined || value === null || value === "") return null;
   return allowed.includes(value) ? null : json({ error: `Invalid ${field}: ${value}` }, 400);
@@ -464,12 +473,18 @@ export default async (req) => {
       case "keywordCreate": {
         const k = payload;
         if (!k.client_id) return json({ error: "Pick a client for the keyword." }, 400);
+        const bad = badEnum("platform", k.platform, KEYWORD_PLATFORMS);
+        if (bad) return bad;
         const cur = toRank(k.current_rank);
         const checkedAt = cur == null ? null : new Date().toISOString();
         const targetUrl = safeHttpUrl(k.target_url);
         if (targetUrl === null) return json({ error: "Target URL must be an http(s) URL." }, 400);
-        const created = await sql`insert into keywords (client_id, keyword, current_rank, previous_rank, target_url, checked_at, notes)
-          values (${k.client_id}, ${k.keyword || ""}, ${cur}, ${null}, ${targetUrl}, ${checkedAt}, ${k.notes || ""})
+        const created = await sql`insert into keywords
+          (client_id, keyword, current_rank, previous_rank, target_url, checked_at, notes,
+           search_engine, location, platform, volume, starred, auto_track)
+          values (${k.client_id}, ${k.keyword || ""}, ${cur}, ${null}, ${targetUrl}, ${checkedAt}, ${k.notes || ""},
+                  ${k.search_engine || "www.google.com"}, ${k.location || ""}, ${k.platform || "desktop"},
+                  ${toRank(k.volume)}, ${Boolean(k.starred)}, ${Boolean(k.auto_track)})
           returning id`;
         // Record the first rank point so the history chart has a starting value.
         if (cur != null && created.length) {
@@ -481,6 +496,8 @@ export default async (req) => {
       case "keywordUpdate": {
         const k = payload;
         if (!k.id) return json({ error: "Missing keyword id." }, 400);
+        const bad = badEnum("platform", k.platform, KEYWORD_PLATFORMS);
+        if (bad) return bad;
         const rows = await sql`select current_rank, previous_rank, checked_at from keywords where id=${k.id} limit 1`;
         if (!rows.length) return json({ error: "Keyword not found." }, 404);
         const existing = rows[0];
@@ -494,12 +511,59 @@ export default async (req) => {
         if (targetUrl === null) return json({ error: "Target URL must be an http(s) URL." }, 400);
         await sql`update keywords set
           keyword=${k.keyword || ""}, current_rank=${cur}, previous_rank=${previous_rank ?? null},
-          target_url=${targetUrl}, checked_at=${checked_at ?? null}, notes=${k.notes || ""}
+          target_url=${targetUrl}, checked_at=${checked_at ?? null}, notes=${k.notes || ""},
+          search_engine=${k.search_engine || "www.google.com"}, location=${k.location || ""},
+          platform=${k.platform || "desktop"}, volume=${toRank(k.volume)},
+          starred=${Boolean(k.starred)}, auto_track=${Boolean(k.auto_track)}
           where id=${k.id}`;
         // Append a history point whenever the rank actually changes to a real value.
         if (rankChanged && cur != null) {
           await sql`insert into keyword_history (keyword_id, rank) values (${k.id}, ${cur})`;
         }
+        return json({ ok: true });
+      }
+
+      case "keywordsBulkAdd": {
+        // Serpfox-style bulk add: one textarea line per keyword, all sharing the
+        // same client / target URL / engine / location / platform. No rank yet —
+        // ranks arrive via manual edits or the scheduled auto-check.
+        const p = payload;
+        if (!p.client_id) return json({ error: "Pick a client for the keywords." }, 400);
+        const bad = badEnum("platform", p.platform, KEYWORD_PLATFORMS);
+        if (bad) return bad;
+        const targetUrl = safeHttpUrl(p.target_url);
+        if (targetUrl === null) return json({ error: "Target URL must be an http(s) URL." }, 400);
+        const seen = new Set();
+        const list = [];
+        for (const raw of Array.isArray(p.keywords) ? p.keywords : []) {
+          const kw = String(raw || "").trim();
+          if (!kw) continue;                          // drop empty lines
+          const key = kw.toLowerCase();
+          if (seen.has(key)) continue;                // dedupe within the batch
+          seen.add(key);
+          list.push(kw);
+          if (list.length >= 200) break;              // cap per call
+        }
+        if (!list.length) return json({ error: "Enter at least one keyword." }, 400);
+        // One statement for the whole batch — unnest turns the array into rows.
+        await sql`insert into keywords (client_id, keyword, target_url, search_engine, location, platform)
+          select ${p.client_id}, kw, ${targetUrl}, ${p.search_engine || "www.google.com"},
+                 ${p.location || ""}, ${p.platform || "desktop"}
+          from unnest(${list}::text[]) as kw`;
+        return json({ ok: true, added: list.length });
+      }
+
+      case "keywordsBulkDelete": {
+        // Not admin-gated — only client deletion is. History rows cascade.
+        const ids = (Array.isArray(payload.ids) ? payload.ids : []).slice(0, 500);
+        if (!ids.length) return json({ error: "No keywords selected." }, 400);
+        await sql`delete from keywords where id = any(${ids}::uuid[])`;
+        return json({ ok: true });
+      }
+
+      case "keywordStar": {
+        if (!payload.id) return json({ error: "Missing keyword id." }, 400);
+        await sql`update keywords set starred=${Boolean(payload.starred)} where id=${payload.id}`;
         return json({ ok: true });
       }
 

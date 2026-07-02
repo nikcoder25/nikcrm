@@ -86,12 +86,15 @@ export default function Dashboard({ session, onSignOut }) {
   // Wrap each mutation so a failure surfaces instead of silently doing nothing.
   // The follow-up refresh happens in place (no loading flash). On failure we
   // also refresh, so any optimistic local change rolls back to server truth.
+  // Returns the API result (undefined on failure) so callers like the bulk-add
+  // modal can report success counts.
   const run = async (fn) => {
     setError("");
-    try { await fn(); await refresh(); }
+    try { const result = await fn(); await refresh(); return result; }
     catch (e) {
       handleErr(e, "Something went wrong.");
       if (e?.status !== 401) await refresh();
+      return undefined;
     }
   };
 
@@ -111,6 +114,9 @@ export default function Dashboard({ session, onSignOut }) {
   const createKeyword = (k) => run(() => api.createKeyword(k));
   const updateKeyword = (k) => run(() => api.updateKeyword(k));
   const delKeyword = (id) => { if (window.confirm("Delete this keyword and its rank history?")) run(() => api.deleteKeyword(id)); };
+  const bulkAddKeywords = (p) => run(() => api.bulkAddKeywords(p));
+  // Bulk delete is confirmed inside Keywords.jsx (it knows the selection count).
+  const bulkDeleteKeywords = (ids) => run(() => api.bulkDeleteKeywords(ids));
 
   // High-frequency status changes are applied to local state IMMEDIATELY
   // (optimistic), then synced to the server; the background refresh restores
@@ -122,6 +128,10 @@ export default function Dashboard({ session, onSignOut }) {
   const updateDeliverable = (d) => {
     setDeliverables((ds) => ds.map((x) => (x.id === d.id ? { ...x, ...d } : x)));
     run(() => api.updateDeliverable(d));
+  };
+  const starKeyword = (id, starred) => {
+    setKeywords((ks) => ks.map((k) => (k.id === id ? { ...k, starred } : k)));
+    run(() => api.starKeyword(id, starred));
   };
   const setPayment = (client_id, month, patch) => {
     setPayments((ps) => {
@@ -222,7 +232,7 @@ export default function Dashboard({ session, onSignOut }) {
                 tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
                 tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
                 tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} /> :
-                tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} /> :
+                tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
                 tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
                 <Team clients={clients} tasks={tasks} />}
             </div>

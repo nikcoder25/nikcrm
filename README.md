@@ -17,7 +17,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Task Board** (kanban): Guest Post, On-Page, Backlink, Anchor Text, Blog, Audit, Schema. Assign people, move To Do → In Progress → Done
 - **Deliverables**: track what you owe each client — type, quantity, due date, and status (Planned / In Progress / Delivered / Blocked), grouped by client with a per-client delivered/total summary
 - **Retainer / scope tracking**: set each client's agreed monthly scope (included quantity per deliverable type) and see included-vs-delivered per month with an **over scope / complete / to-go** flag — catches scope creep. Surfaced in the client detail, the Monthly Report, and the Overview's "Needs attention" list
-- **Keywords**: manual keyword-rank tracking per client — current rank, movement vs the previous rank (up/down/same), target URL, and a **rank-over-time trend chart** (each rank change is recorded), with avg-rank and top-10 summaries. Also surfaced inside each client's detail view
+- **Keywords**: a Serpfox-style rank tracker. The tab groups keywords **by URL/client** — net change, best/worst rank, keyword count and a green/gray/red movement bar per group — with a **Last / Week / Month** period toggle. Expanding a group shows every keyword with rank, change, **search volume, search engine, location and desktop/mobile platform**, a per-keyword **rank-over-time chart** (rank 1 on top, date ticks, zoom), **starring**, and **bulk actions** (star / unstar / delete selected). **Bulk add** pastes up to 200 keywords at once (one per line, shared target URL / engine / location / platform). Optional **automatic daily rank checks** via DataForSEO: set `DATAFORSEO_LOGIN` + `DATAFORSEO_PASSWORD` env vars and tick "Auto-check rank" on a keyword — a scheduled function (`netlify/functions/rank-check.mjs`, 06:00 UTC) looks up the target domain's live Google/Bing position and records the history; without the keys, tracking stays fully manual. Also surfaced inside each client's detail view
 - **Revenue**: MRR, collected vs pending per month, revenue by source, and a per-client payment tracker (Pending / Paid / Overdue)
 - **Team** view: who has how many clients and tasks
 
@@ -77,7 +77,8 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
 ├── .env.example            Local dev env template (APP_PASSWORD / ADMIN_PASSWORD)
 ├── netlify/
 │   └── functions/
-│       └── data.js         API: auth check + all DB reads/writes (Neon)
+│       ├── data.js         API: auth check + all DB reads/writes (Neon)
+│       └── rank-check.mjs  Scheduled daily DataForSEO rank checks (optional)
 ├── db/
 │   ├── schema.sql          Reference schema (auto-created by the function)
 │   └── seed-clients.sql    Optional: preload clients
@@ -113,7 +114,7 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
 ## Notes
 - **Security model.** This is a lightweight internal tool: access is gated by a shared password that the browser sends with each API request, and the database is only reachable through the Netlify Function — never directly from the browser. Set strong passwords and share them carefully. For per-person accounts you'd add a real auth provider later.
 - **Uploaded files** are stored in **Netlify Blobs**, which is enabled automatically for any site with functions — no setup. Downloads are also password-gated (served through the function, never a public URL). Limit is 4 MB per file; for bigger assets, attach a link instead.
-- **Keyword ranks are entered manually** (no third-party rank API). When you change a keyword's rank, the old value automatically rolls into "previous" so the up/down movement stays meaningful.
+- **Keyword ranks are entered manually by default**; keywords with "Auto-check rank" ticked are refreshed daily by the scheduled DataForSEO function when `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` are set. Either way, when a keyword's rank changes the old value automatically rolls into "previous" so the up/down movement stays meaningful.
 - **Built for 100+ clients.** All foreign keys are indexed (auto-created like the tables), status changes apply instantly (optimistic UI with background sync), refreshes never blank the screen, and every list has search/filter controls.
 - Set each client's monthly fee in the client form — the Revenue tab rolls up from there.
 - **Export to CSV**: each list (Clients, Deliverables, Keywords, Payments) has an "Export CSV" button that downloads the data — opens straight in Excel / Google Sheets. Runs entirely in the browser on already-loaded data.
