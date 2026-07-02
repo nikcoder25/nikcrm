@@ -9,7 +9,7 @@ import { Field, Pick, Row, Modal, assigneeOptions } from "./ui";
 export default function ClientForm({ initial, members = [], onClose, onSave }) {
   const [f, setF] = useState(initial || {
     name: "", niche: "", status: "active", source: "Direct", package: "Standard",
-    fee: "", team_member: "", start_month: "", renewal_month: "", risk: "low", notes: "", gsc_property: "",
+    fee: "", team_member: "", start_month: "", renewal_month: "", risk: "low", notes: "", gsc_property: "", email: "",
   });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
@@ -57,6 +57,7 @@ export default function ClientForm({ initial, members = [], onClose, onSave }) {
         <Field label="Start month" value={f.start_month} onChange={(v) => set("start_month", v)} type="month" />
         <Field label="Renewal month" value={f.renewal_month} onChange={(v) => set("renewal_month", v)} type="month" />
       </Row>
+      <Field label="Contact email" value={f.email} onChange={(v) => set("email", v)} placeholder="name@company.com — enables Gmail sync" type="email" />
       {feeWithoutStart && (
         <div style={{ background: "#fdf3d8", border: "2px solid #b7791f", color: "#7a4f10", borderRadius: 9, padding: "9px 12px", fontSize: 12.5, fontWeight: 700, marginTop: 10 }}>
           ⚠ This client has a monthly fee but no start month. Add one so Monthly Recurring stays accurate.

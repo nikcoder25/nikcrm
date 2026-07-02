@@ -1,10 +1,11 @@
 import React, { useState } from "react";
-import { StickyNote, Phone, Mail, Users, Trash2, Send, Clock, CalendarClock, Check, CalendarPlus } from "lucide-react";
+import { StickyNote, Phone, Mail, Users, Trash2, Send, Clock, CalendarClock, Check, CalendarPlus, RefreshCw, CalendarCheck } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, btn, input, iconBtn } from "../lib/theme";
 import { ACTIVITY_TYPES, activityLabel } from "../lib/constants";
 import { dateTimeLabel, localDateTimeInput, dateLabel, isPastDue } from "../lib/format";
 import { addActivity, deleteActivity, setActivityFollowup } from "../lib/api";
 import { activitiesIcs, icsEventCount, downloadIcs } from "../lib/ics";
+import { pushToCalendar, syncGmail } from "../lib/google";
 import { useToast } from "../lib/toast";
 import { Empty } from "./ui";
 
@@ -20,7 +21,7 @@ export const activityIcon = (type) => {
 // filtered + sorted (happened_at desc) by the parent. Mutations ask the
 // Dashboard for a narrow refresh of just the touched datasets (the touchpoint
 // rows plus the audit trail written server-side).
-export default function Activity({ client, activities = [], author = "", onChanged }) {
+export default function Activity({ client, activities = [], author = "", googleConnected = false, onChanged }) {
   const [type, setType] = useState("note");
   const [body, setBody] = useState("");
   const [when, setWhen] = useState("");        // datetime-local; blank = now
@@ -72,6 +73,28 @@ export default function Activity({ client, activities = [], author = "", onChang
     })();
   };
 
+  // Push a single follow-up / meeting to the connected Google Calendar.
+  const pushCalendar = (id) => {
+    setBusy(true);
+    (async () => {
+      try { await pushToCalendar(id); await onChanged(); toast("Added to Google Calendar"); }
+      catch (e) { toast(e?.message || "Could not add to calendar.", "error"); }
+      setBusy(false);
+    })();
+  };
+
+  // Import recent Gmail messages with this client into the timeline.
+  const gmailSync = () => {
+    setBusy(true);
+    (async () => {
+      try { const r = await syncGmail(client.id); await onChanged(); toast(r.imported ? `Imported ${r.imported} email${r.imported > 1 ? "s" : ""}` : "No new emails found"); }
+      catch (e) { toast(e?.message || "Gmail sync failed.", "error"); }
+      setBusy(false);
+    })();
+  };
+
+  const canCalendar = (a) => Boolean(a.follow_up_date) || (a.type === "meeting" && a.happened_at);
+
   return (
     <div style={{ marginTop: 22 }} className="no-print">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
@@ -81,11 +104,17 @@ export default function Activity({ client, activities = [], author = "", onChang
             <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>{activities.length}</span>
           )}
         </h2>
+        {googleConnected && client.email && (
+          <button style={{ ...btn("#fff", ink), padding: "8px 12px", fontSize: 12.5 }} disabled={busy}
+            title={`Import recent Gmail with ${client.email}`} onClick={gmailSync}>
+            <RefreshCw size={15} /> Sync Gmail
+          </button>
+        )}
         {icsEventCount(activities) > 0 && (
           <button style={{ ...btn("#fff", ink), padding: "8px 12px", fontSize: 12.5 }}
             title="Download follow-ups & meetings as a calendar file"
             onClick={() => downloadIcs(`${(client.name || "client").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-calendar.ics`, activitiesIcs(activities, new Map([[client.id, client.name]])))}>
-            <CalendarPlus size={15} /> Add to calendar
+            <CalendarPlus size={15} /> Export .ics
           </button>
         )}
       </div>
@@ -163,6 +192,11 @@ export default function Activity({ client, activities = [], author = "", onChang
                     </div>
                   )}
                 </div>
+                {googleConnected && canCalendar(a) && (
+                  a.google_event_id
+                    ? <span title="On Google Calendar" aria-label="On Google Calendar" style={{ ...iconBtn, color: "#1f7a4d", cursor: "default" }}><CalendarCheck size={14} /></span>
+                    : <button style={iconBtn} title="Add to Google Calendar" aria-label="Add to Google Calendar" disabled={busy} onClick={() => pushCalendar(a.id)}><CalendarPlus size={14} /></button>
+                )}
                 <button style={iconBtn} title="Remove" aria-label="Remove activity" disabled={busy} onClick={() => remove(a.id)}><Trash2 size={14} /></button>
               </div>
             );

@@ -211,7 +211,7 @@ function Detail({ label, value }) {
 
 // onChanged(...sets) asks the Dashboard to re-fetch: pass the dataset names the
 // mutation touched (e.g. "resources") for a narrow refresh, no args for a full one.
-export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], backlinks = [], aiCitations = [], reports = [], retainers = [], activities = [], payments = [], tasks = [], author = "", isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
+export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], backlinks = [], aiCitations = [], reports = [], retainers = [], activities = [], payments = [], tasks = [], author = "", googleConnected = false, isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
   const health = computeHealth(client, { deliverables, payments, tasks, keywords, activities });
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
@@ -356,7 +356,7 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
           </div>
         </div>
 
-        <Activity client={client} activities={activities} author={author} onChanged={onChanged} />
+        <Activity client={client} activities={activities} author={author} googleConnected={googleConnected} onChanged={onChanged} />
 
         <div style={{ marginTop: 22, borderTop: "2px solid #f0ece2", paddingTop: 20 }}>
           <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>

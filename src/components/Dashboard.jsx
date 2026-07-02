@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles, Menu, X } from "lucide-react";
+import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles, Menu, X, Settings as SettingsIcon } from "lucide-react";
 import * as api from "../lib/api";
 import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, iconBtn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
@@ -19,6 +19,8 @@ import Team from "./Team";
 import ClientForm from "./ClientForm";
 import ClientDetail from "./ClientDetail";
 import CommandPalette from "./CommandPalette";
+import Settings from "./Settings";
+import { googleStatus } from "../lib/google";
 
 /* ---------------- Dashboard ---------------- */
 export default function Dashboard({ session, onSignOut }) {
@@ -45,6 +47,7 @@ export default function Dashboard({ session, onSignOut }) {
   const [editing, setEditing] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false); // mobile drawer
   const [paletteOpen, setPaletteOpen] = useState(false); // ⌘K quick-jump
+  const [googleConnected, setGoogleConnected] = useState(false); // Gmail/Calendar
 
   const toast = useToast();
 
@@ -114,6 +117,27 @@ export default function Dashboard({ session, onSignOut }) {
   };
   const load = async () => { setLoading(true); setError(""); await refresh(); setLoading(false); };
   useEffect(() => { load(); }, []);
+
+  // Learn whether the workspace Google account is connected, so client pages can
+  // show the Gmail/Calendar sync actions. Best-effort — never blocks the board.
+  const refreshGoogle = async () => {
+    try { const s = await googleStatus(); setGoogleConnected(Boolean(s.connected)); }
+    catch { /* integration optional — ignore */ }
+  };
+  useEffect(() => { refreshGoogle(); }, []);
+
+  // Surface the OAuth callback result (?google=connected|error) as a toast, then
+  // strip the query so a refresh doesn't repeat it.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const g = params.get("google");
+    if (!g) return;
+    if (g === "connected") { toast("Google connected"); refreshGoogle(); }
+    else if (g === "error") { toast("Google connection failed. Please try again.", "error"); }
+    params.delete("google"); params.delete("msg");
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
+  }, []);
 
   // Global ⌘K / Ctrl-K opens the quick-jump palette from anywhere.
   useEffect(() => {
@@ -243,6 +267,7 @@ export default function Dashboard({ session, onSignOut }) {
     { k: "revenue", l: "Revenue", i: DollarSign },
     { k: "activity", l: "Activity", i: History },
     { k: "team", l: "Team", i: Users },
+    { k: "settings", l: "Settings", i: SettingsIcon },
   ];
 
   const errorBanner = error && (
@@ -319,6 +344,7 @@ export default function Dashboard({ session, onSignOut }) {
                   payments={payments.filter((p) => p.client_id === detailClient.id)}
                   tasks={tasks.filter((t) => t.client_id === detailClient.id)}
                   author={session.name}
+                  googleConnected={googleConnected}
                   isAdmin={isAdmin}
                   onBack={backToClients}
                   onEdit={(c) => { setEditing(c); setShowForm(true); }}
@@ -351,6 +377,7 @@ export default function Dashboard({ session, onSignOut }) {
                 tab === "ai" ? <AiVisibility clients={clients} citations={aiCitations} onCreate={createAiCitation} onUpdate={updateAiCitation} onDelete={delAiCitation} /> :
                 tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
                 tab === "activity" ? <ActivityLog items={activity} clients={clients} /> :
+                tab === "settings" ? <Settings isAdmin={isAdmin} name={session.name} onConnected={setGoogleConnected} /> :
                 <Team members={members} clients={clients} tasks={tasks} onSave={saveMember} onDelete={delMember} isAdmin={isAdmin} />}
             </div>
           </>
