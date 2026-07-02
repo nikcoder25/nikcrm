@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Plus, Pencil, Trash2, X, ArrowUp, ArrowDown, Minus, Search, Target, Download,
   Star, ChevronRight, ChevronDown, ZoomIn, ZoomOut,
 } from "lucide-react";
+import { fetchKeywordHistory, getSession } from "../lib/api";
 import { ink, accent, tint, disp, BD, BDt, btn, iconBtn, overlay, modal, lbl, input } from "../lib/theme";
 import { downloadCsv, keywordsCsv } from "../lib/csv";
 import { Panel, Empty, Field, Row, Pick, RevCard } from "./ui";
@@ -178,8 +179,28 @@ function RankHistoryPanel({ keyword, points, width = 620, height = 190 }) {
   );
 }
 
+/* The initial load only ships each keyword's last 25 rank points; fetch the
+   full series lazily when a chart opens, showing the preloaded points until it
+   arrives (no flash). The read-only portal has no team session — there the
+   preloaded history is already complete, so it skips the fetch. */
+function useFullHistory(keyword, preloaded) {
+  const [full, setFull] = useState(null);
+  useEffect(() => {
+    setFull(null);
+    if (!keyword?.id || !getSession()) return;
+    let live = true;
+    fetchKeywordHistory(keyword.id).then((r) => { if (live) setFull(r.points || null); }).catch(() => {});
+    return () => { live = false; };
+  }, [keyword?.id]);
+  return full ?? preloaded;
+}
+
+function LazyRankHistory({ keyword, points }) {
+  return <RankHistoryPanel keyword={keyword} points={useFullHistory(keyword, points)} />;
+}
+
 function KeywordHistoryModal({ keyword, points, onClose }) {
-  const pts = points.filter((p) => p.rank != null);
+  const pts = useFullHistory(keyword, points).filter((p) => p.rank != null);
   return (
     <div style={overlay} onClick={(e) => { e.stopPropagation(); onClose(); }}>
       <div style={{ ...modal, maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
@@ -493,7 +514,7 @@ function KeywordTable({ items, byKw, period, onEdit, onDelete, onStar, onBulkDel
                 </div>
                 {isOpen && (
                   <div style={{ padding: "12px 20px", borderBottom: "1px solid #f0ece2" }}>
-                    <RankHistoryPanel keyword={k} points={pts} />
+                    <LazyRankHistory keyword={k} points={pts} />
                   </div>
                 )}
               </React.Fragment>

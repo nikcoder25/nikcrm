@@ -1,16 +1,17 @@
 import React from "react";
-import { FolderKanban, CheckSquare, ClipboardList, DollarSign, Search, AlertTriangle } from "lucide-react";
+import { FolderKanban, CheckSquare, ClipboardList, DollarSign, Search, AlertTriangle, History } from "lucide-react";
 import { tint, disp, BD, BDt } from "../lib/theme";
 import { money, ym, isPastDue } from "../lib/format";
 import { typeLabel, deliverableStatusLabel } from "../lib/constants";
 import { Panel, Empty, RevCard } from "./ui";
+import { ActivityFeed } from "./Activity";
 import { keywordSummary } from "./Keywords";
 import { scopeRows } from "../lib/scope";
 
 const overdueDeliverable = (d) => isPastDue(d.due_date) && d.status !== "delivered";
 const overdueTask = (t) => isPastDue(t.due) && (t.status || "todo") !== "done";
 
-export default function Overview({ clients, tasks, deliverables, payments, keywords, retainers = [] }) {
+export default function Overview({ clients, tasks, deliverables, payments, keywords, retainers = [], activity = [] }) {
   const nameOf = (id) => clients.find((c) => c.id === id)?.name || "—";
 
   const activeClients = clients.filter((c) => c.status === "active");
@@ -69,6 +70,15 @@ export default function Overview({ clients, tasks, deliverables, payments, keywo
           ))
         )}
       </Panel>
+
+      <div style={{ marginTop: 18 }}>
+        <Panel>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 20px", borderBottom: BD, fontFamily: disp, fontSize: 15, textTransform: "uppercase" }}>
+            <History size={16} /> Recent activity
+          </div>
+          <ActivityFeed items={activity.slice(0, 8)} clients={clients} />
+        </Panel>
+      </div>
     </div>
   );
 }

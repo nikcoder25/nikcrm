@@ -17,7 +17,8 @@ async function call(action, payload) {
       "content-type": "application/json",
       ...(s?.password ? { "x-app-password": s.password } : {}),
     },
-    body: JSON.stringify({ action, payload }),
+    // _actor = the display name shown in the activity log for this action.
+    body: JSON.stringify({ action, payload: { ...payload, _actor: s?.name } }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -108,6 +109,8 @@ export const deleteKeyword = (id) => call("keywordDelete", { id });
 export const bulkAddKeywords = (p) => call("keywordsBulkAdd", p);
 export const bulkDeleteKeywords = (ids) => call("keywordsBulkDelete", { ids });
 export const starKeyword = (id, starred) => call("keywordStar", { id, starred });
+// Full rank history for one keyword — `load` only ships the last 25 points.
+export const fetchKeywordHistory = (keyword_id) => call("keywordHistory", { keyword_id });
 
 /* ---------------- monthly reports (per-client narrative) ---------------- */
 export const saveReport = (client_id, period, summary) => call("reportSave", { client_id, period, summary });

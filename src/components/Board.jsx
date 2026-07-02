@@ -10,6 +10,9 @@ export default function Board({ clients, tasks, onAdd, onMove, onDelete }) {
   const [f, setF] = useState({ client_id: "", title: "", type: "guest", assignee: "", due: "" });
   const [filterClient, setFilterClient] = useState("");
   const [filterAssignee, setFilterAssignee] = useState("");
+  // Native HTML5 drag and drop; the ‹ › buttons stay as the mobile/keyboard fallback.
+  const [dragId, setDragId] = useState(null);
+  const [overCol, setOverCol] = useState(null);
   const nameOf = (id) => (clients.find((c) => c.id === id)?.name) || "";
   const add = () => {
     if (!f.client_id || !f.title.trim()) return;
@@ -58,14 +61,30 @@ export default function Board({ clients, tasks, onAdd, onMove, onDelete }) {
           const items = visible.filter((t) => (t.status || "todo") === col.key);
           const bg = col.key === "todo" ? "#f0ece2" : col.key === "doing" ? tint : "#ded7f5";
           const idx = TASK_STATES.findIndex((s) => s.key === col.key);
+          const isOver = overCol === col.key;
           return (
-            <div key={col.key} style={{ background: bg, border: BD, borderRadius: 16, padding: 14, minHeight: 180, boxShadow: SH }}>
+            <div key={col.key}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; setOverCol(col.key); }}
+              onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOverCol(null); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const id = e.dataTransfer.getData("text/plain");
+                setOverCol(null); setDragId(null);
+                const task = tasks.find((t) => t.id === id);
+                if (task && (task.status || "todo") !== col.key) onMove(id, col.key);
+              }}
+              style={{ background: bg, border: isOver ? `3px dashed ${accent}` : BD, borderRadius: 16, padding: 14, minHeight: 180, boxShadow: SH }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontFamily: disp, fontSize: 15, textTransform: "uppercase", padding: "2px 4px 14px" }}>
                 <span>{col.label}</span><span style={{ background: ink, color: "#fff", borderRadius: 20, padding: "2px 11px", fontSize: 12.5 }}>{items.length}</span>
               </div>
               {items.length === 0 && <div style={{ textAlign: "center", padding: "18px 0", opacity: 0.5, fontWeight: 700, fontSize: 12.5 }}>Nothing here</div>}
               {items.map((t) => (
-                <div key={t.id} style={{ background: "#fff", border: BDt, borderRadius: 12, padding: 14, marginBottom: 12, boxShadow: SHs }}>
+                <div key={t.id}
+                  draggable
+                  onDragStart={(e) => { e.dataTransfer.setData("text/plain", t.id); e.dataTransfer.effectAllowed = "move"; setDragId(t.id); }}
+                  onDragEnd={() => { setDragId(null); setOverCol(null); }}
+                  style={{ background: "#fff", border: BDt, borderRadius: 12, padding: 14, marginBottom: 12, boxShadow: SHs, cursor: "grab",
+                    ...(dragId === t.id ? { opacity: 0.5, transform: "rotate(2deg)" } : {}) }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <span style={{ fontSize: 10.5, fontWeight: 800, padding: "4px 9px", borderRadius: 7, border: "2px solid " + ink, textTransform: "uppercase", background: tint }}>{typeLabel(t.type)}</span>
                     <button style={{ background: "none", border: "none", cursor: "pointer", opacity: 0.4 }} onClick={() => onDelete(t.id)}><X size={13} /></button>

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard } from "lucide-react";
+import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History } from "lucide-react";
 import * as api from "../lib/api";
 import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
 import { useRouter, clientIdFromPath, clientPath } from "../lib/router";
 import { Center, Panel, Empty } from "./ui";
 import Overview from "./Overview";
+import Activity from "./Activity";
 import Clients from "./Clients";
 import Board from "./Board";
 import Deliverables from "./Deliverables";
@@ -26,6 +27,7 @@ export default function Dashboard({ session, onSignOut }) {
   const [keywordHistory, setKeywordHistory] = useState([]);
   const [reports, setReports] = useState([]);
   const [retainers, setRetainers] = useState([]);
+  const [activity, setActivity] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
   const [tab, setTab] = useState("overview");
   const [loading, setLoading] = useState(true);
@@ -57,7 +59,7 @@ export default function Dashboard({ session, onSignOut }) {
   // full-screen loader is reserved for the very first load.
   const refresh = async () => {
     try {
-      const { clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers } = await api.load();
+      const { clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, activity } = await api.load();
       setClients(clients || []);
       setTasks(tasks || []);
       setPayments(payments || []);
@@ -67,6 +69,7 @@ export default function Dashboard({ session, onSignOut }) {
       setKeywordHistory(keyword_history || []);
       setReports(client_reports || []);
       setRetainers(client_retainers || []);
+      setActivity(activity || []);
     } catch (e) {
       handleErr(e, "Could not reach the database.");
     }
@@ -149,6 +152,7 @@ export default function Dashboard({ session, onSignOut }) {
     { k: "deliverables", l: "Deliverables", i: ClipboardList },
     { k: "keywords", l: "Keywords", i: Search },
     { k: "revenue", l: "Revenue", i: DollarSign },
+    { k: "activity", l: "Activity", i: History },
     { k: "team", l: "Team", i: Users },
   ];
 
@@ -228,12 +232,13 @@ export default function Dashboard({ session, onSignOut }) {
 
             <div style={{ padding: 28 }}>
               {loading ? <Center>Loading your board...</Center> :
-                tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} /> :
+                tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} activity={activity} /> :
                 tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} /> :
                 tab === "tasks" ? <Board clients={clients} tasks={tasks} onAdd={addTask} onMove={moveTask} onDelete={delTask} /> :
                 tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onCreate={createDeliverable} onUpdate={updateDeliverable} onDelete={delDeliverable} /> :
                 tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
                 tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
+                tab === "activity" ? <Activity items={activity} clients={clients} /> :
                 <Team clients={clients} tasks={tasks} />}
             </div>
           </>

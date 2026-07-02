@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { money, ym, ymLabel, todayStr, isPastDue } from "./format.js";
+import { money, ym, ymLabel, todayStr, isPastDue, timeAgo } from "./format.js";
 
 describe("money", () => {
   it("formats numbers with a dollar sign", () => {
@@ -27,5 +27,23 @@ describe("isPastDue", () => {
     expect(isPastDue(todayStr())).toBe(false);
     expect(isPastDue("2999-12-31")).toBe(false);
     expect(isPastDue(null)).toBe(false);
+  });
+});
+
+describe("timeAgo", () => {
+  const now = new Date("2026-07-02T12:00:00Z");
+  const ago = (ms) => new Date(now.getTime() - ms).toISOString();
+  it("buckets by age", () => {
+    expect(timeAgo(ago(30 * 1000), now)).toBe("just now");
+    expect(timeAgo(ago(2 * 60 * 1000), now)).toBe("2m ago");
+    expect(timeAgo(ago(3 * 3600 * 1000), now)).toBe("3h ago");
+    expect(timeAgo(ago(30 * 3600 * 1000), now)).toBe("yesterday");
+  });
+  it("falls back to a short date beyond two days", () => {
+    expect(timeAgo("2026-06-01T12:00:00Z", now)).toMatch(/Jun 1, 2026/);
+  });
+  it("returns empty for junk and never goes negative", () => {
+    expect(timeAgo("not a date", now)).toBe("");
+    expect(timeAgo(ago(-60 * 1000), now)).toBe("just now"); // slight clock skew
   });
 });

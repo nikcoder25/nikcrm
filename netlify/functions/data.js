@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { neon } from "@netlify/neon";
 import { getStore } from "@netlify/blobs";
-import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES } from "../../src/lib/constants.js";
+import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, typeLabel } from "../../src/lib/constants.js";
 
 // Uploaded client files live in a Netlify Blobs store (auto-available to
 // functions — no setup). The DB "resources" table holds the metadata + blob key.
@@ -150,6 +150,19 @@ async function ensureSchema(sql) {
     recipient text not null,
     enabled boolean default true
   )`;
+  // Audit trail. client_id has NO foreign key on purpose: activity must
+  // survive client deletion, so the human-readable name lives in
+  // entity_label/detail instead of being joined at read time.
+  await sql`create table if not exists activity (
+    id uuid primary key default gen_random_uuid(),
+    actor text default '',
+    verb text not null,
+    entity text not null,
+    entity_label text default '',
+    client_id uuid,
+    detail text default '',
+    created_at timestamptz default now()
+  )`;
   // Postgres does NOT auto-index foreign-key columns. Without these, every
   // per-client lookup and every ON DELETE CASCADE does a full table scan,
   // which degrades linearly as the client count grows. Idempotent, so they
@@ -163,8 +176,17 @@ async function ensureSchema(sql) {
     sql`create index if not exists idx_keywords_client on keywords (client_id)`,
     sql`create index if not exists idx_keyword_history_kw on keyword_history (keyword_id)`,
     sql`create index if not exists idx_keyword_history_time on keyword_history (recorded_at)`,
+    sql`create index if not exists idx_activity_time on activity (created_at desc)`,
   ]);
   schemaReady = true;
+}
+
+// Best-effort audit write — a logging failure must never fail the action itself.
+async function logActivity(sql, { actor = "", verb, entity, entity_label = "", client_id = null, detail = "" }) {
+  try {
+    await sql`insert into activity (actor, verb, entity, entity_label, client_id, detail)
+      values (${actor}, ${verb}, ${entity}, ${entity_label}, ${client_id ?? null}, ${detail})`;
+  } catch { /* best effort */ }
 }
 
 // Content types that are safe to render in the browser. Anything else —
@@ -400,12 +422,15 @@ export default async (req) => {
     return json({ error: "Database not configured. Set NETLIFY_DATABASE_URL." }, 503);
   }
 
+  // Who did it, for the activity log. Sent by the frontend on every call.
+  const actor = String(payload._actor || "").trim().slice(0, 80);
+
   try {
     const sql = db();
     await ensureSchema(sql);
     switch (action) {
       case "load": {
-        const [clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers] = await Promise.all([
+        const [clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, activity] = await Promise.all([
           sql`select * from clients order by created_at desc`,
           sql`select * from tasks order by created_at desc`,
           sql`select * from payments`,
@@ -413,11 +438,25 @@ export default async (req) => {
               from resources order by created_at desc`,
           sql`select * from deliverables order by created_at desc`,
           sql`select * from keywords order by created_at desc`,
-          sql`select id, keyword_id, rank, recorded_at from keyword_history order by recorded_at asc`,
+          // keyword_history is unbounded; only ship the last 25 points per
+          // keyword. The full series comes from the keywordHistory action.
+          sql`select id, keyword_id, rank, recorded_at from
+              (select h.*, row_number() over (partition by keyword_id order by recorded_at desc) rn from keyword_history h) t
+              where rn <= 25 order by recorded_at asc`,
           sql`select id, client_id, period, summary, updated_at from client_reports`,
           sql`select id, client_id, type, quantity from client_retainers`,
+          sql`select id, actor, verb, entity, entity_label, client_id, detail, created_at
+              from activity order by created_at desc limit 100`,
         ]);
-        return json({ clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers });
+        return json({ clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, activity });
+      }
+
+      case "keywordHistory": {
+        // Full rank series for one keyword — load only preloads the last 25.
+        if (!payload.keyword_id) return json({ error: "Missing keyword id." }, 400);
+        const points = await sql`select id, keyword_id, rank, recorded_at from keyword_history
+          where keyword_id=${payload.keyword_id} order by recorded_at asc`;
+        return json({ points });
       }
 
       case "clientSave": {
@@ -436,19 +475,23 @@ export default async (req) => {
             start_month=${c.start_month || ""}, renewal_month=${c.renewal_month || ""},
             risk=${c.risk || "low"}, notes=${c.notes || ""}
             where id=${c.id}`;
+          await logActivity(sql, { actor, verb: "updated client", entity: "client", entity_label: c.name, client_id: c.id });
         } else {
-          await sql`insert into clients
+          const ins = await sql`insert into clients
             (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes, created_by)
             values (${c.name}, ${c.niche || ""}, ${c.status || "active"}, ${c.source || "Direct"},
                     ${c.package || "Standard"}, ${Number(c.fee) || 0}, ${c.team_member || ""},
                     ${c.start_month || ""}, ${c.renewal_month || ""}, ${c.risk || "low"},
-                    ${c.notes || ""}, ${c.created_by || ""})`;
+                    ${c.notes || ""}, ${c.created_by || ""}) returning id`;
+          await logActivity(sql, { actor, verb: "created client", entity: "client", entity_label: c.name, client_id: ins[0]?.id });
         }
         return json({ ok: true });
       }
 
       case "clientDelete": {
         if (!isAdmin) return json({ error: "Only an admin can delete clients." }, 403);
+        // Name captured BEFORE the delete — it's all the activity log keeps.
+        const named = await sql`select name from clients where id=${payload.id} limit 1`;
         // Remove the client's uploaded blobs first (DB rows cascade, blobs don't).
         const files = await sql`select blob_key from resources
           where client_id=${payload.id} and kind='file' and blob_key <> ''`;
@@ -457,6 +500,7 @@ export default async (req) => {
           for (const f of files) { try { await store.delete(f.blob_key); } catch { /* best effort */ } }
         }
         await sql`delete from clients where id=${payload.id}`;
+        if (named.length) await logActivity(sql, { actor, verb: "deleted client", entity: "client", entity_label: named[0].name, client_id: payload.id });
         return json({ ok: true });
       }
 
@@ -467,18 +511,23 @@ export default async (req) => {
         await sql`insert into tasks (client_id, title, type, assignee, status, due)
           values (${t.client_id}, ${t.title}, ${t.type || "other"}, ${t.assignee || ""},
                   ${t.status || "todo"}, ${t.due || null})`;
+        await logActivity(sql, { actor, verb: "added task", entity: "task", entity_label: `"${t.title}"`, client_id: t.client_id });
         return json({ ok: true });
       }
 
       case "taskMove": {
         const bad = badEnum("status", payload.status, TASK_STATE_KEYS);
         if (bad) return bad;
+        const moved = await sql`select title, client_id from tasks where id=${payload.id} limit 1`;
         await sql`update tasks set status=${payload.status} where id=${payload.id}`;
+        if (moved.length) await logActivity(sql, { actor, verb: "moved task", entity: "task", entity_label: `"${moved[0].title}"`, client_id: moved[0].client_id, detail: `to ${TASK_STATES.find((s) => s.key === payload.status)?.label || payload.status}` });
         return json({ ok: true });
       }
 
       case "taskDelete": {
+        const gone = await sql`select title, client_id from tasks where id=${payload.id} limit 1`;
         await sql`delete from tasks where id=${payload.id}`;
+        if (gone.length) await logActivity(sql, { actor, verb: "deleted task", entity: "task", entity_label: `"${gone[0].title}"`, client_id: gone[0].client_id });
         return json({ ok: true });
       }
 
@@ -491,6 +540,8 @@ export default async (req) => {
           values (${p.client_id}, ${p.month}, ${Number(p.amount) || 0}, ${p.status}, ${paidDate})
           on conflict (client_id, month) do update set
             amount=excluded.amount, status=excluded.status, paid_date=excluded.paid_date`;
+        const payee = await sql`select name from clients where id=${p.client_id} limit 1`;
+        await logActivity(sql, { actor, verb: "marked payment", entity: "payment", entity_label: `${payee[0]?.name || "client"} ${p.month}`, client_id: p.client_id, detail: p.status });
         return json({ ok: true });
       }
 
@@ -546,6 +597,7 @@ export default async (req) => {
         if (!linkUrl) return json({ error: "Links must be http(s) URLs." }, 400);
         await sql`insert into resources (client_id, kind, label, url, created_by)
           values (${r.client_id}, 'link', ${r.label || ""}, ${linkUrl}, ${r.created_by || ""})`;
+        await logActivity(sql, { actor, verb: "added link", entity: "resource", entity_label: r.label || linkUrl, client_id: r.client_id });
         return json({ ok: true });
       }
 
@@ -564,15 +616,17 @@ export default async (req) => {
           values (${r.client_id}, 'file', ${r.label || r.filename || "File"}, ${key},
                   ${r.filename || "file"}, ${r.content_type || "application/octet-stream"},
                   ${buffer.length}, ${r.created_by || ""})`;
+        await logActivity(sql, { actor, verb: "uploaded file", entity: "resource", entity_label: r.label || r.filename || "File", client_id: r.client_id });
         return json({ ok: true });
       }
 
       case "resourceDelete": {
-        const rows = await sql`select kind, blob_key from resources where id=${payload.id} limit 1`;
+        const rows = await sql`select kind, blob_key, label, client_id from resources where id=${payload.id} limit 1`;
         if (rows.length && rows[0].kind === "file" && rows[0].blob_key) {
           try { await getStore(FILES_STORE).delete(rows[0].blob_key); } catch { /* best effort */ }
         }
         await sql`delete from resources where id=${payload.id}`;
+        if (rows.length) await logActivity(sql, { actor, verb: "deleted resource", entity: "resource", entity_label: rows[0].label, client_id: rows[0].client_id });
         return json({ ok: true });
       }
 
@@ -584,6 +638,7 @@ export default async (req) => {
         await sql`insert into deliverables (client_id, title, type, status, quantity, due_date, notes)
           values (${d.client_id}, ${d.title || ""}, ${d.type || "other"}, ${d.status || "planned"},
                   ${Number(d.quantity) || 1}, ${d.due_date || null}, ${d.notes || ""})`;
+        await logActivity(sql, { actor, verb: "created deliverable", entity: "deliverable", entity_label: d.title || typeLabel(d.type), client_id: d.client_id });
         return json({ ok: true });
       }
 
@@ -596,12 +651,15 @@ export default async (req) => {
           title=${d.title || ""}, type=${d.type || "other"}, status=${d.status || "planned"},
           quantity=${Number(d.quantity) || 1}, due_date=${d.due_date || null}, notes=${d.notes || ""}
           where id=${d.id}`;
+        await logActivity(sql, { actor, verb: "updated deliverable", entity: "deliverable", entity_label: d.title || typeLabel(d.type), client_id: d.client_id });
         return json({ ok: true });
       }
 
       case "deliverableDelete": {
         // Not admin-gated — only client deletion is.
+        const del = await sql`select title, type, client_id from deliverables where id=${payload.id} limit 1`;
         await sql`delete from deliverables where id=${payload.id}`;
+        if (del.length) await logActivity(sql, { actor, verb: "deleted deliverable", entity: "deliverable", entity_label: del[0].title || typeLabel(del[0].type), client_id: del[0].client_id });
         return json({ ok: true });
       }
 
@@ -625,6 +683,7 @@ export default async (req) => {
         if (cur != null && created.length) {
           await sql`insert into keyword_history (keyword_id, rank) values (${created[0].id}, ${cur})`;
         }
+        await logActivity(sql, { actor, verb: "added keyword", entity: "keyword", entity_label: k.keyword || "", client_id: k.client_id });
         return json({ ok: true });
       }
 
@@ -655,6 +714,7 @@ export default async (req) => {
         if (rankChanged && cur != null) {
           await sql`insert into keyword_history (keyword_id, rank) values (${k.id}, ${cur})`;
         }
+        await logActivity(sql, { actor, verb: "updated keyword", entity: "keyword", entity_label: k.keyword || "", client_id: k.client_id });
         return json({ ok: true });
       }
 
@@ -685,6 +745,7 @@ export default async (req) => {
           select ${p.client_id}, kw, ${targetUrl}, ${p.search_engine || "www.google.com"},
                  ${p.location || ""}, ${p.platform || "desktop"}
           from unnest(${list}::text[]) as kw`;
+        await logActivity(sql, { actor, verb: "added", entity: "keywords", entity_label: `${list.length} keyword${list.length === 1 ? "" : "s"}`, client_id: p.client_id });
         return json({ ok: true, added: list.length });
       }
 
@@ -692,7 +753,8 @@ export default async (req) => {
         // Not admin-gated — only client deletion is. History rows cascade.
         const ids = (Array.isArray(payload.ids) ? payload.ids : []).slice(0, 500);
         if (!ids.length) return json({ error: "No keywords selected." }, 400);
-        await sql`delete from keywords where id = any(${ids}::uuid[])`;
+        const removed = await sql`delete from keywords where id = any(${ids}::uuid[]) returning client_id`;
+        if (removed.length) await logActivity(sql, { actor, verb: "deleted", entity: "keywords", entity_label: `${removed.length} keyword${removed.length === 1 ? "" : "s"}`, client_id: removed[0].client_id });
         return json({ ok: true });
       }
 
@@ -704,7 +766,9 @@ export default async (req) => {
 
       case "keywordDelete": {
         // Not admin-gated — only client deletion is.
+        const kwGone = await sql`select keyword, client_id from keywords where id=${payload.id} limit 1`;
         await sql`delete from keywords where id=${payload.id}`;
+        if (kwGone.length) await logActivity(sql, { actor, verb: "deleted keyword", entity: "keyword", entity_label: kwGone[0].keyword, client_id: kwGone[0].client_id });
         return json({ ok: true });
       }
 
@@ -716,6 +780,7 @@ export default async (req) => {
           values (${r.client_id}, ${r.period}, ${r.summary || ""})
           on conflict (client_id, period) do update set
             summary=excluded.summary, updated_at=now()`;
+        await logActivity(sql, { actor, verb: "saved", entity: "report", entity_label: `${r.period} report`, client_id: r.client_id });
         return json({ ok: true });
       }
 
@@ -732,6 +797,7 @@ export default async (req) => {
         await sql`insert into client_retainers (client_id, type, quantity)
           values (${r.client_id}, ${r.type}, ${Number(r.quantity) || 0})
           on conflict (client_id, type) do update set quantity=excluded.quantity`;
+        await logActivity(sql, { actor, verb: "updated retainer", entity: "retainer", entity_label: typeLabel(r.type), client_id: r.client_id });
         return json({ ok: true });
       }
 
@@ -751,6 +817,8 @@ export default async (req) => {
 
       case "portalTokenCreate": {
         if (!payload.client_id) return json({ error: "Missing client." }, 400);
+        const [info] = await sql`select (select name from clients where id=${payload.client_id}) as name,
+          exists(select 1 from client_portal_tokens where client_id=${payload.client_id}) as had`;
         // 64 hex chars of crypto randomness. Regenerating replaces the old
         // token — any previously shared link stops working — and re-enables
         // the portal (creating a fresh link implies you want it live).
@@ -759,6 +827,7 @@ export default async (req) => {
           values (${payload.client_id}, ${token})
           on conflict (client_id) do update set
             token=excluded.token, enabled=true, created_at=now()`;
+        await logActivity(sql, { actor, verb: info?.had ? "regenerated portal link for" : "created portal link for", entity: "portal", entity_label: info?.name || "", client_id: payload.client_id });
         return json({ token });
       }
 
@@ -766,6 +835,8 @@ export default async (req) => {
         if (!payload.client_id) return json({ error: "Missing client." }, 400);
         await sql`update client_portal_tokens set enabled=${Boolean(payload.enabled)}
           where client_id=${payload.client_id}`;
+        const pc = await sql`select name from clients where id=${payload.client_id} limit 1`;
+        await logActivity(sql, { actor, verb: `${payload.enabled ? "enabled" : "disabled"} portal link for`, entity: "portal", entity_label: pc[0]?.name || "", client_id: payload.client_id });
         return json({ ok: true });
       }
 

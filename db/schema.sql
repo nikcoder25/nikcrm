@@ -140,6 +140,20 @@ create table if not exists client_retainers (
   unique (client_id, type)
 );
 
+-- Activity log (audit trail): who did what, when. client_id has NO foreign
+-- key on purpose — activity must survive client deletion, so the readable
+-- name is recorded in entity_label/detail instead.
+create table if not exists activity (
+  id uuid primary key default gen_random_uuid(),
+  actor text default '',
+  verb text not null,
+  entity text not null,
+  entity_label text default '',
+  client_id uuid,
+  detail text default '',
+  created_at timestamptz default now()
+);
+
 -- ============================================================
 -- Indexes. Postgres does not auto-index FK columns; without these,
 -- per-client lookups and ON DELETE CASCADE degrade linearly with data size.
@@ -153,3 +167,4 @@ create index if not exists idx_deliverables_client on deliverables (client_id);
 create index if not exists idx_keywords_client on keywords (client_id);
 create index if not exists idx_keyword_history_kw on keyword_history (keyword_id);
 create index if not exists idx_keyword_history_time on keyword_history (recorded_at);
+create index if not exists idx_activity_time on activity (created_at desc);
