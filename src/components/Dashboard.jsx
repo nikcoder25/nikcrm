@@ -74,6 +74,15 @@ export default function Dashboard({ session, onSignOut }) {
   const load = async () => { setLoading(true); setError(""); await refresh(); setLoading(false); };
   useEffect(() => { load(); }, []);
 
+  // Background sync so teammates' changes show up without any interaction.
+  // Skipped while the tab is hidden to avoid pointless requests.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   // Wrap each mutation so a failure surfaces instead of silently doing nothing.
   // The follow-up refresh happens in place (no loading flash). On failure we
   // also refresh, so any optimistic local change rolls back to server truth.
@@ -90,14 +99,18 @@ export default function Dashboard({ session, onSignOut }) {
     await api.saveClient(c.id ? c : { ...c, created_by: session.name });
     setShowForm(false); setEditing(null);
   });
-  const delClient = (id) => run(async () => { await api.deleteClient(id); backToClients(); });
+  const delClient = (id) => {
+    const c = clients.find((x) => String(x.id) === String(id));
+    if (!window.confirm(`Delete client "${c?.name || "this client"}"? All their tasks, payments, keywords, deliverables and files go with them. This cannot be undone.`)) return;
+    run(async () => { await api.deleteClient(id); backToClients(); });
+  };
   const addTask = (t) => run(() => api.addTask(t));
-  const delTask = (id) => run(() => api.deleteTask(id));
+  const delTask = (id) => { if (window.confirm("Delete this task?")) run(() => api.deleteTask(id)); };
   const createDeliverable = (d) => run(() => api.createDeliverable(d));
-  const delDeliverable = (id) => run(() => api.deleteDeliverable(id));
+  const delDeliverable = (id) => { if (window.confirm("Delete this deliverable?")) run(() => api.deleteDeliverable(id)); };
   const createKeyword = (k) => run(() => api.createKeyword(k));
   const updateKeyword = (k) => run(() => api.updateKeyword(k));
-  const delKeyword = (id) => run(() => api.deleteKeyword(id));
+  const delKeyword = (id) => { if (window.confirm("Delete this keyword and its rank history?")) run(() => api.deleteKeyword(id)); };
 
   // High-frequency status changes are applied to local state IMMEDIATELY
   // (optimistic), then synced to the server; the background refresh restores

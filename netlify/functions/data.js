@@ -1,5 +1,7 @@
+import { timingSafeEqual } from "node:crypto";
 import { neon } from "@netlify/neon";
 import { getStore } from "@netlify/blobs";
+import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES } from "../../src/lib/constants.js";
 
 // Uploaded client files live in a Netlify Blobs store (auto-available to
 // functions — no setup). The DB "resources" table holds the metadata + blob key.
@@ -136,6 +138,38 @@ async function ensureSchema(sql) {
   schemaReady = true;
 }
 
+// Content types that are safe to render in the browser. Anything else —
+// notably text/html and image/svg+xml, which can run scripts on our origin —
+// is served as a generic binary attachment instead.
+const INLINE_SAFE = new Set([
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
+  "application/pdf", "text/plain", "text/csv",
+  "video/mp4", "video/webm", "audio/mpeg", "audio/wav",
+]);
+
+// Only real web links are allowed anywhere we store a user-supplied URL.
+// Returns the normalized href, "" for blank input, or null when invalid
+// (bad syntax or a non-http(s) scheme like javascript:).
+function safeHttpUrl(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  let u;
+  try { u = new URL(s); }
+  catch { try { u = new URL("https://" + s); } catch { return null; } }
+  return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+}
+
+// Enum validation: a typo'd status/source silently drops rows out of every
+// rollup, so reject unknown values at the API instead of trusting the UI.
+const TASK_TYPE_KEYS = TASK_TYPES.map((t) => t.key);
+const TASK_STATE_KEYS = TASK_STATES.map((s) => s.key);
+const PAY_STATE_KEYS = PAY_STATES.map((s) => s.key);
+const DELIVERABLE_STATE_KEYS = DELIVERABLE_STATES.map((s) => s.key);
+function badEnum(field, value, allowed) {
+  if (value === undefined || value === null || value === "") return null;
+  return allowed.includes(value) ? null : json({ error: `Invalid ${field}: ${value}` }, 400);
+}
+
 // Rank is a positive integer or null (unranked). Coerce loosely from the UI.
 function toRank(v) {
   if (v === "" || v === null || v === undefined) return null;
@@ -154,14 +188,48 @@ function authConfigured() {
   return Boolean(process.env.APP_PASSWORD || process.env.ADMIN_PASSWORD);
 }
 
+// Constant-time string compare so response timing can't leak how much of the
+// password prefix matched.
+function safeEq(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
+
 // Returns "admin" / "member" for a correct password, or null for a wrong one.
 // Only call this once authConfigured() is true.
 function resolveRole(pw) {
   const APP = process.env.APP_PASSWORD || "";
   const ADMIN = process.env.ADMIN_PASSWORD || "";
-  if (ADMIN && pw === ADMIN) return "admin";
-  if (APP && pw === APP) return "member";
+  if (ADMIN && safeEq(pw, ADMIN)) return "admin";
+  if (APP && safeEq(pw, APP)) return "member";
   return null;                                  // wrong / missing password
+}
+
+// Brute-force throttle for login attempts. Per-instance memory is enough to
+// blunt password spraying without a datastore: after MAX_FAILS failures from
+// one IP inside the window, reject with 429 until the window resets.
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+const MAX_FAILS = 15;
+const loginFails = new Map(); // ip -> { count, resetAt }
+function clientIp(req) {
+  return req.headers.get("x-nf-client-connection-ip")
+    || (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
+    || "unknown";
+}
+function loginBlocked(ip) {
+  const rec = loginFails.get(ip);
+  if (!rec || Date.now() > rec.resetAt) return false;
+  return rec.count >= MAX_FAILS;
+}
+function noteLoginFail(ip) {
+  const rec = loginFails.get(ip);
+  if (!rec || Date.now() > rec.resetAt) {
+    loginFails.set(ip, { count: 1, resetAt: Date.now() + LOGIN_WINDOW_MS });
+  } else {
+    rec.count += 1;
+  }
+  if (loginFails.size > 5000) loginFails.clear(); // bound memory
 }
 
 const NOT_CONFIGURED = "Login isn't set up yet. Set APP_PASSWORD in Netlify.";
@@ -183,11 +251,15 @@ export default async (req) => {
       const data = await getStore(FILES_STORE).get(key, { type: "arrayBuffer" });
       if (!data) return json({ error: "File no longer stored" }, 404);
       const safeName = (rows[0].filename || "file").replace(/["\\\r\n]/g, "");
+      // Whitelisted types may render inline; everything else (esp. HTML/SVG,
+      // which would execute scripts on our origin) downloads as a plain binary.
+      const inlineSafe = INLINE_SAFE.has(rows[0].content_type);
       return new Response(data, {
         status: 200,
         headers: {
-          "content-type": rows[0].content_type || "application/octet-stream",
-          "content-disposition": `inline; filename="${safeName}"`,
+          "content-type": inlineSafe ? rows[0].content_type : "application/octet-stream",
+          "content-disposition": `${inlineSafe ? "inline" : "attachment"}; filename="${safeName}"`,
+          "x-content-type-options": "nosniff",
         },
       });
     } catch (e) {
@@ -204,8 +276,13 @@ export default async (req) => {
   // Login: validate the password and hand back the role for the UI.
   if (action === "login") {
     if (!authConfigured()) return json({ error: NOT_CONFIGURED }, 503);
+    const ip = clientIp(req);
+    if (loginBlocked(ip)) return json({ error: "Too many attempts. Try again in a few minutes." }, 429);
     const role = resolveRole(payload.password || "");
-    if (!role) return json({ error: "Wrong password. Ask your team lead for it." }, 401);
+    if (!role) {
+      noteLoginFail(ip);
+      return json({ error: "Wrong password. Ask your team lead for it." }, 401);
+    }
     return json({ ok: true, role });
   }
 
@@ -245,6 +322,12 @@ export default async (req) => {
 
       case "clientSave": {
         const c = payload;
+        if (!c.name || !String(c.name).trim()) return json({ error: "Client name is required." }, 400);
+        const bad = badEnum("status", c.status, STATUSES)
+          || badEnum("source", c.source, SOURCES)
+          || badEnum("package", c.package, PACKAGES)
+          || badEnum("risk", c.risk, RISKS);
+        if (bad) return bad;
         if (c.id) {
           await sql`update clients set
             name=${c.name}, niche=${c.niche || ""}, status=${c.status || "active"},
@@ -279,6 +362,8 @@ export default async (req) => {
 
       case "taskAdd": {
         const t = payload;
+        const bad = badEnum("type", t.type, TASK_TYPE_KEYS) || badEnum("status", t.status, TASK_STATE_KEYS);
+        if (bad) return bad;
         await sql`insert into tasks (client_id, title, type, assignee, status, due)
           values (${t.client_id}, ${t.title}, ${t.type || "other"}, ${t.assignee || ""},
                   ${t.status || "todo"}, ${t.due || null})`;
@@ -286,6 +371,8 @@ export default async (req) => {
       }
 
       case "taskMove": {
+        const bad = badEnum("status", payload.status, TASK_STATE_KEYS);
+        if (bad) return bad;
         await sql`update tasks set status=${payload.status} where id=${payload.id}`;
         return json({ ok: true });
       }
@@ -297,6 +384,8 @@ export default async (req) => {
 
       case "paymentSet": {
         const p = payload;
+        const bad = badEnum("status", p.status, PAY_STATE_KEYS);
+        if (bad) return bad;
         const paidDate = p.status === "paid" ? new Date().toISOString().slice(0, 10) : null;
         await sql`insert into payments (client_id, month, amount, status, paid_date)
           values (${p.client_id}, ${p.month}, ${Number(p.amount) || 0}, ${p.status}, ${paidDate})
@@ -309,8 +398,10 @@ export default async (req) => {
         const r = payload;
         if (!r.client_id) return json({ error: "Missing client." }, 400);
         if (!r.url || !r.url.trim()) return json({ error: "A link URL is required." }, 400);
+        const linkUrl = safeHttpUrl(r.url);
+        if (!linkUrl) return json({ error: "Links must be http(s) URLs." }, 400);
         await sql`insert into resources (client_id, kind, label, url, created_by)
-          values (${r.client_id}, 'link', ${r.label || ""}, ${r.url.trim()}, ${r.created_by || ""})`;
+          values (${r.client_id}, 'link', ${r.label || ""}, ${linkUrl}, ${r.created_by || ""})`;
         return json({ ok: true });
       }
 
@@ -344,6 +435,8 @@ export default async (req) => {
       case "deliverableCreate": {
         const d = payload;
         if (!d.client_id) return json({ error: "Pick a client for the deliverable." }, 400);
+        const bad = badEnum("type", d.type, TASK_TYPE_KEYS) || badEnum("status", d.status, DELIVERABLE_STATE_KEYS);
+        if (bad) return bad;
         await sql`insert into deliverables (client_id, title, type, status, quantity, due_date, notes)
           values (${d.client_id}, ${d.title || ""}, ${d.type || "other"}, ${d.status || "planned"},
                   ${Number(d.quantity) || 1}, ${d.due_date || null}, ${d.notes || ""})`;
@@ -353,6 +446,8 @@ export default async (req) => {
       case "deliverableUpdate": {
         const d = payload;
         if (!d.id) return json({ error: "Missing deliverable id." }, 400);
+        const bad = badEnum("type", d.type, TASK_TYPE_KEYS) || badEnum("status", d.status, DELIVERABLE_STATE_KEYS);
+        if (bad) return bad;
         await sql`update deliverables set
           title=${d.title || ""}, type=${d.type || "other"}, status=${d.status || "planned"},
           quantity=${Number(d.quantity) || 1}, due_date=${d.due_date || null}, notes=${d.notes || ""}
@@ -371,8 +466,10 @@ export default async (req) => {
         if (!k.client_id) return json({ error: "Pick a client for the keyword." }, 400);
         const cur = toRank(k.current_rank);
         const checkedAt = cur == null ? null : new Date().toISOString();
+        const targetUrl = safeHttpUrl(k.target_url);
+        if (targetUrl === null) return json({ error: "Target URL must be an http(s) URL." }, 400);
         const created = await sql`insert into keywords (client_id, keyword, current_rank, previous_rank, target_url, checked_at, notes)
-          values (${k.client_id}, ${k.keyword || ""}, ${cur}, ${null}, ${k.target_url || ""}, ${checkedAt}, ${k.notes || ""})
+          values (${k.client_id}, ${k.keyword || ""}, ${cur}, ${null}, ${targetUrl}, ${checkedAt}, ${k.notes || ""})
           returning id`;
         // Record the first rank point so the history chart has a starting value.
         if (cur != null && created.length) {
@@ -393,9 +490,11 @@ export default async (req) => {
         const rankChanged = (cur ?? null) !== (existing.current_rank ?? null);
         const previous_rank = rankChanged ? existing.current_rank : existing.previous_rank;
         const checked_at = rankChanged ? new Date().toISOString() : existing.checked_at;
+        const targetUrl = safeHttpUrl(k.target_url);
+        if (targetUrl === null) return json({ error: "Target URL must be an http(s) URL." }, 400);
         await sql`update keywords set
           keyword=${k.keyword || ""}, current_rank=${cur}, previous_rank=${previous_rank ?? null},
-          target_url=${k.target_url || ""}, checked_at=${checked_at ?? null}, notes=${k.notes || ""}
+          target_url=${targetUrl}, checked_at=${checked_at ?? null}, notes=${k.notes || ""}
           where id=${k.id}`;
         // Append a history point whenever the rank actually changes to a real value.
         if (rankChanged && cur != null) {

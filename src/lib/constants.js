@@ -3,6 +3,7 @@ export const STATUSES = ["lead", "upcoming", "active", "paused", "ended", "loss"
 export const STATUS_LABEL = { lead: "Lead", upcoming: "Upcoming", active: "Active", paused: "Paused", ended: "Ended", loss: "SEO Loss" };
 export const SOURCES = ["Direct", "Fiverr", "Referral", "Other"];
 export const PACKAGES = ["Basic", "Standard", "Premium", "Custom"];
+export const RISKS = ["low", "medium", "high"];
 
 export const TASK_TYPES = [
   { key: "guest", label: "Guest Post" }, { key: "onpage", label: "On-Page SEO" },

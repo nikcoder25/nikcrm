@@ -1,6 +1,6 @@
 import React from "react";
 import { FolderKanban, CheckSquare, ClipboardList, DollarSign, Search, AlertTriangle } from "lucide-react";
-import { ink, accent, tint, disp, BD, BDt } from "../lib/theme";
+import { tint, disp, BD, BDt } from "../lib/theme";
 import { money, ym, isPastDue } from "../lib/format";
 import { typeLabel, deliverableStatusLabel } from "../lib/constants";
 import { Panel, Empty, RevCard } from "./ui";

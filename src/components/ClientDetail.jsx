@@ -73,14 +73,20 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
     window.open(url, "_blank", "noopener");
   });
 
-  const removeResource = (id) => guard(async () => { await deleteResource(id); onChanged(); });
+  const removeResource = (id) => {
+    if (!window.confirm("Remove this resource? Uploaded files are deleted permanently.")) return;
+    guard(async () => { await deleteResource(id); onChanged(); });
+  };
 
   const saveKeyword = (k) => guard(async () => {
     await (k.id ? updateKeyword(k) : createKeyword(k));
     setKwForm(false); setKwEditing(null);
     onChanged();
   });
-  const removeKeyword = (id) => guard(async () => { await deleteKeyword(id); onChanged(); });
+  const removeKeyword = (id) => {
+    if (!window.confirm("Delete this keyword and its rank history?")) return;
+    guard(async () => { await deleteKeyword(id); onChanged(); });
+  };
 
   const kstats = keywordSummary(keywords);
 

@@ -62,7 +62,7 @@ export default function Revenue({ clients, payments, month, setMonth, onSet }) {
 
       <Panel>
         <div style={{ padding: "16px 20px", fontFamily: disp, fontSize: 15, textTransform: "uppercase", borderBottom: BD }}>Payments · {ymLabel(month)}</div>
-        {active.length === 0 ? <Empty>No active clients.</Empty> : monthPays.map(({ client, amount, status }) => (
+        {active.length === 0 ? <Empty>No active clients.</Empty> : monthPays.map(({ client, status }) => (
           <div key={client.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", borderBottom: "2px solid #f0ece2" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 800, fontSize: 14.5 }}>{client.name}</div>

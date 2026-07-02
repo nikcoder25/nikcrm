@@ -21,7 +21,6 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
   useEffect(() => {
     setDraft(reports.find((r) => r.period === month)?.summary || "");
     setMsg("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month]);
 
   const months = (() => {
