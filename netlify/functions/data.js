@@ -726,6 +726,46 @@ export default async (req) => {
         return json(await loadDatasets(sql, Object.keys(DATASET_QUERIES)));
       }
 
+      case "backupExport": {
+        // Full-database export for offline safekeeping, admin-only. Ships every
+        // business table in full (unlike `load`, which trims history tables).
+        // Excluded on purpose: users' password hashes/salts, integration OAuth
+        // tokens + state, portal tokens (all secrets), and file_blobs bytes
+        // (can be huge; file METADATA is in `resources` — re-upload the files).
+        if (!isAdmin) return json({ error: "Only an admin can export a backup." }, 403);
+        const names = [
+          "clients", "tasks", "payments", "resources", "deliverables",
+          "keywords", "keyword_history", "backlinks", "ai_citations",
+          "ai_citation_history", "client_reports", "client_retainers",
+          "team_members", "client_report_emails", "gsc_daily", "gsc_queries",
+          "activities", "activity",
+        ];
+        const [users, ...rows] = await Promise.all([
+          sql`select id, name, email, role, active, created_at from users`,
+          sql`select * from clients order by created_at`,
+          sql`select * from tasks order by created_at`,
+          sql`select * from payments order by created_at`,
+          sql`select id, client_id, kind, label, url, blob_key, filename, content_type, size, created_by, created_at from resources order by created_at`,
+          sql`select * from deliverables order by created_at`,
+          sql`select * from keywords order by created_at`,
+          sql`select * from keyword_history order by recorded_at`,
+          sql`select * from backlinks order by created_at`,
+          sql`select * from ai_citations order by created_at`,
+          sql`select * from ai_citation_history order by recorded_at`,
+          sql`select * from client_reports order by created_at`,
+          sql`select * from client_retainers order by created_at`,
+          sql`select * from team_members order by created_at`,
+          sql`select * from client_report_emails`,
+          sql`select * from gsc_daily order by date`,
+          sql`select * from gsc_queries order by month`,
+          sql`select * from activities order by created_at`,
+          sql`select * from activity order by created_at`,
+        ]);
+        const tables = Object.fromEntries(names.map((n, i) => [n, rows[i]]));
+        tables.users = users;
+        return json({ format: "growth-atlas-backup", version: 1, exported_at: new Date().toISOString(), tables });
+      }
+
       case "loadSome": {
         // Per-entity refresh: fetch only the datasets a mutation touched
         // instead of re-reading the whole database after every change.

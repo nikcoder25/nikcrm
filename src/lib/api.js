@@ -66,6 +66,8 @@ export async function login(name, password, email) {
 }
 
 export const load = () => call("load");
+// Admin-only full-database export (every business table; no secrets/file bytes).
+export const backupExport = () => call("backupExport");
 // Per-entity refresh: fetch only the named datasets (e.g. ["tasks"]) instead
 // of the whole database. Same row shapes as `load`, keyed by dataset name.
 export const loadSome = (sets) => call("loadSome", { sets });
