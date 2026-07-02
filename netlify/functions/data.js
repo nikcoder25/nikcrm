@@ -111,10 +111,19 @@ async function ensureSchema(sql) {
     updated_at timestamptz default now(),
     unique (client_id, period)
   )`;
+  await sql`create table if not exists client_retainers (
+    id uuid primary key default gen_random_uuid(),
+    client_id uuid references clients(id) on delete cascade,
+    type text not null,                      -- deliverable type (reuses task types)
+    quantity integer default 0,              -- agreed monthly included quantity
+    created_at timestamptz default now(),
+    unique (client_id, type)
+  )`;
   // Postgres does NOT auto-index foreign-key columns. Without these, every
   // per-client lookup and every ON DELETE CASCADE does a full table scan,
   // which degrades linearly as the client count grows. Idempotent, so they
-  // cost nothing after the first run.
+  // cost nothing after the first run. (payments, client_reports and
+  // client_retainers are covered by unique constraints leading with client_id.)
   await Promise.all([
     sql`create index if not exists idx_tasks_client on tasks (client_id)`,
     sql`create index if not exists idx_resources_client on resources (client_id)`,
@@ -219,7 +228,7 @@ export default async (req) => {
     await ensureSchema(sql);
     switch (action) {
       case "load": {
-        const [clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports] = await Promise.all([
+        const [clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers] = await Promise.all([
           sql`select * from clients order by created_at desc`,
           sql`select * from tasks order by created_at desc`,
           sql`select * from payments`,
@@ -229,8 +238,9 @@ export default async (req) => {
           sql`select * from keywords order by created_at desc`,
           sql`select id, keyword_id, rank, recorded_at from keyword_history order by recorded_at asc`,
           sql`select id, client_id, period, summary, updated_at from client_reports`,
+          sql`select id, client_id, type, quantity from client_retainers`,
         ]);
-        return json({ clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports });
+        return json({ clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers });
       }
 
       case "clientSave": {
@@ -414,6 +424,22 @@ export default async (req) => {
       case "reportDelete": {
         // Not admin-gated — only client deletion is.
         await sql`delete from client_reports where id=${payload.id}`;
+        return json({ ok: true });
+      }
+
+      case "retainerSave": {
+        // Upsert the agreed monthly quantity for a client + deliverable type.
+        const r = payload;
+        if (!r.client_id || !r.type) return json({ error: "Missing client or type." }, 400);
+        await sql`insert into client_retainers (client_id, type, quantity)
+          values (${r.client_id}, ${r.type}, ${Number(r.quantity) || 0})
+          on conflict (client_id, type) do update set quantity=excluded.quantity`;
+        return json({ ok: true });
+      }
+
+      case "retainerDelete": {
+        // Not admin-gated — only client deletion is.
+        await sql`delete from client_retainers where id=${payload.id}`;
         return json({ ok: true });
       }
 

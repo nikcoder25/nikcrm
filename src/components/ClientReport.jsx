@@ -4,12 +4,13 @@ import { ink, accent, tint, disp, BD, BDt, btn, sel, input } from "../lib/theme"
 import { typeLabel, deliverableStatusLabel } from "../lib/constants";
 import { ym, ymLabel } from "../lib/format";
 import { keywordSummary, movement } from "./Keywords";
+import { scopeRows } from "../lib/scope";
 import { saveReport } from "../lib/api";
 import { Empty } from "./ui";
 
 const arrow = (dir) => (dir === "up" ? "▲" : dir === "down" ? "▼" : dir === "new" ? "•" : "–");
 
-export default function ClientReport({ client, keywords = [], deliverables = [], reports = [], onChanged }) {
+export default function ClientReport({ client, keywords = [], deliverables = [], reports = [], retainers = [], onChanged }) {
   const [month, setMonth] = useState(ym(new Date()));
   const savedForMonth = reports.find((r) => r.period === month)?.summary || "";
   const [draft, setDraft] = useState(savedForMonth);
@@ -34,6 +35,7 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
   const ks = keywordSummary(keywords);
   const netImprovement = keywords.reduce((s, k) => (k.current_rank != null && k.previous_rank != null ? s + (Number(k.previous_rank) - Number(k.current_rank)) : s), 0);
   const delivered = deliverables.filter((d) => d.status === "delivered").length;
+  const scope = scopeRows(retainers, deliverables, client.id, month);
   const dirty = draft !== savedForMonth;
 
   const save = async () => {
@@ -122,6 +124,24 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
             </div>
           )}
         </div>
+
+        {/* Scope vs delivered (only shown when a retainer scope is set) */}
+        {scope.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", marginBottom: 8 }}>Scope delivered</div>
+            <div style={{ border: BDt, borderRadius: 8, overflow: "hidden" }}>
+              {scope.map((r) => (
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f0ece2", fontSize: 13 }}>
+                  <span style={{ flex: 1, fontWeight: 700 }}>{typeLabel(r.type)}</span>
+                  <span style={{ color: "#6b6580", fontWeight: 700 }}>{r.delivered} / {r.included}</span>
+                  <span style={{ fontWeight: 800, minWidth: 92, textAlign: "right", color: r.state === "over" ? "#c0392b" : r.state === "complete" ? "#1f9d57" : "#6b6580" }}>
+                    {r.state === "over" ? `Over +${r.delta}` : r.state === "complete" ? "Complete" : `${Math.max(0, -r.delta)} to go`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Narrative */}
         <div>
