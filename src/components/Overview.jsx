@@ -1,11 +1,12 @@
 import React from "react";
-import { FolderKanban, CheckSquare, ClipboardList, DollarSign, Search, AlertTriangle, Clock } from "lucide-react";
+import { FolderKanban, CheckSquare, ClipboardList, DollarSign, Search, AlertTriangle, Clock, History } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt } from "../lib/theme";
 import { money, ym, isPastDue, timeAgo, todayStr } from "../lib/format";
 import { typeLabel, deliverableStatusLabel, STATUSES, STATUS_LABEL, activityLabel } from "../lib/constants";
 import { Panel, Empty, RevCard } from "./ui";
 import { keywordSummary } from "./Keywords";
 import { activityIcon } from "./Activity";
+import { ActivityFeed } from "./ActivityLog";
 import { scopeRows } from "../lib/scope";
 
 // Distinct swatch per client status for the breakdown bar.
@@ -14,7 +15,9 @@ const STATUS_COLOR = { lead: "#f0b429", upcoming: "#8b5cf6", active: "#6d28d9", 
 const overdueDeliverable = (d) => isPastDue(d.due_date) && d.status !== "delivered";
 const overdueTask = (t) => isPastDue(t.due) && (t.status || "todo") !== "done";
 
-export default function Overview({ clients, tasks, deliverables, payments, keywords, retainers = [], activities = [], onNavigate, onOpenClient }) {
+// `activities` = client touchpoints (calls/emails/notes, with follow-ups);
+// `activity` = the team audit trail (who changed what). Both render here.
+export default function Overview({ clients, tasks, deliverables, payments, keywords, retainers = [], activities = [], activity = [], onNavigate, onOpenClient }) {
   const clientOf = (id) => clients.find((c) => c.id === id);
   const nameOf = (id) => clientOf(id)?.name || "—";
   const go = (tab) => onNavigate && onNavigate(tab);
@@ -169,6 +172,16 @@ export default function Overview({ clients, tasks, deliverables, payments, keywo
               );
             })
           )}
+        </Panel>
+      </div>
+
+      {/* Team audit trail — who changed what (distinct from the touchpoint feed above). */}
+      <div style={{ marginTop: 16 }}>
+        <Panel>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 20px", borderBottom: BD, fontFamily: disp, fontSize: 15, textTransform: "uppercase" }}>
+            <History size={16} /> Recent changes
+          </div>
+          <ActivityFeed items={activity.slice(0, 8)} clients={clients} />
         </Panel>
       </div>
     </div>

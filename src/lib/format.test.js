@@ -1,0 +1,90 @@
+import { describe, it, expect } from "vitest";
+import { money, ym, ymLabel, todayStr, isPastDue, timeAgo, lastDayOfMonth, dateLabel, dateTimeLabel, localDateTimeInput } from "./format.js";
+
+describe("money", () => {
+  it("formats numbers with a dollar sign", () => {
+    expect(money(1500)).toBe("$1,500");
+  });
+  it("treats junk as zero", () => {
+    expect(money(undefined)).toBe("$0");
+    expect(money("abc")).toBe("$0");
+  });
+});
+
+describe("ym / ymLabel", () => {
+  it("formats a date as YYYY-MM", () => {
+    expect(ym(new Date(2026, 6, 2))).toBe("2026-07");
+  });
+  it("labels a month string", () => {
+    expect(ymLabel("2026-07")).toBe("Jul 2026");
+    expect(ymLabel("")).toBe("");
+  });
+});
+
+describe("lastDayOfMonth", () => {
+  it("returns the month's last day as YYYY-MM-DD", () => {
+    expect(lastDayOfMonth("2026-07")).toBe("2026-07-31");
+    expect(lastDayOfMonth("2026-06")).toBe("2026-06-30");
+    expect(lastDayOfMonth("2026-12")).toBe("2026-12-31");
+  });
+  it("handles February and leap years", () => {
+    expect(lastDayOfMonth("2026-02")).toBe("2026-02-28");
+    expect(lastDayOfMonth("2028-02")).toBe("2028-02-29");
+  });
+});
+
+describe("isPastDue", () => {
+  it("is true strictly before today, false today and later", () => {
+    expect(isPastDue("2000-01-01")).toBe(true);
+    expect(isPastDue(todayStr())).toBe(false);
+    expect(isPastDue("2999-12-31")).toBe(false);
+    expect(isPastDue(null)).toBe(false);
+  });
+});
+
+describe("timeAgo", () => {
+  const now = new Date("2026-07-02T12:00:00Z");
+  const ago = (ms) => new Date(now.getTime() - ms).toISOString();
+  it("buckets by age", () => {
+    expect(timeAgo(ago(30 * 1000), now)).toBe("just now");
+    expect(timeAgo(ago(2 * 60 * 1000), now)).toBe("2m ago");
+    expect(timeAgo(ago(3 * 3600 * 1000), now)).toBe("3h ago");
+    expect(timeAgo(ago(30 * 3600 * 1000), now)).toBe("yesterday");
+  });
+  it("falls back to a short date beyond two days", () => {
+    expect(timeAgo("2026-06-01T12:00:00Z", now)).toMatch(/Jun 1, 2026/);
+  });
+  it("returns empty for junk and never goes negative", () => {
+    expect(timeAgo("not a date", now)).toBe("");
+    expect(timeAgo(ago(-60 * 1000), now)).toBe("just now"); // slight clock skew
+  });
+});
+
+describe("dateLabel", () => {
+  it("formats a plain calendar date without timezone shift", () => {
+    expect(dateLabel("2026-07-02")).toBe("Jul 2, 2026");
+    expect(dateLabel("2026-01-31T00:00:00Z")).toBe("Jan 31, 2026"); // only the date part counts
+  });
+  it("returns empty for junk", () => {
+    expect(dateLabel("")).toBe("");
+    expect(dateLabel(null)).toBe("");
+    expect(dateLabel("not-a-date")).toBe("");
+  });
+});
+
+describe("dateTimeLabel", () => {
+  it("formats a timestamp as a short date-time", () => {
+    // The space before AM/PM varies by ICU version (U+0020 vs U+202F), so match loosely.
+    expect(dateTimeLabel(new Date(2026, 6, 2, 15, 14))).toMatch(/Jul 2, 2026, 3:14\sPM/);
+  });
+  it("returns empty for junk", () => {
+    expect(dateTimeLabel("")).toBe("");
+    expect(dateTimeLabel("nope")).toBe("");
+  });
+});
+
+describe("localDateTimeInput", () => {
+  it("renders a datetime-local value in local time", () => {
+    expect(localDateTimeInput(new Date(2026, 6, 2, 9, 5))).toBe("2026-07-02T09:05");
+  });
+});

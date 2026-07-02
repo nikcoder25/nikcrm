@@ -30,3 +30,12 @@ export function clientIdFromPath(path) {
 }
 
 export const clientPath = (id) => `/clients/${encodeURIComponent(id)}`;
+
+// /portal/:token -> ":token" (string); any other path -> null. The public
+// read-only client portal renders instead of the login/dashboard flow.
+export function portalTokenFromPath(path) {
+  const m = /^\/portal\/([^/]+)\/?$/.exec(path || "");
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+export const portalPath = (token) => `/portal/${encodeURIComponent(token)}`;

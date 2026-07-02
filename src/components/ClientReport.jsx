@@ -4,14 +4,46 @@ import { ink, accent, tint, disp, BD, BDt, btn, sel, input } from "../lib/theme"
 import { typeLabel, deliverableStatusLabel } from "../lib/constants";
 import { ym, ymLabel } from "../lib/format";
 import { keywordSummary, movement } from "./Keywords";
+import { aiCitationSummary } from "./AiVisibility";
 import { scopeRows, deliverableMonth } from "../lib/scope";
-import { saveReport } from "../lib/api";
+import { saveReport, gscLoad } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { Empty } from "./ui";
 
 const arrow = (dir) => (dir === "up" ? "▲" : dir === "down" ? "▼" : dir === "new" ? "•" : "–");
 
-export default function ClientReport({ client, keywords = [], deliverables = [], reports = [], retainers = [], onChanged }) {
+// 'YYYY-MM' one month earlier ('2026-01' → '2025-12').
+const prevYm = (m) => {
+  const [y, mo] = m.split("-").map(Number);
+  const d = new Date(Date.UTC(y, mo - 2, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+
+// Totals for one month's gsc_daily rows: clicks, impressions and the
+// impression-weighted average position. null when the month has no rows.
+function gscMonthTotals(daily, month) {
+  const rows = daily.filter((d) => String(d.date).slice(0, 7) === month);
+  if (!rows.length) return null;
+  let clicks = 0, impressions = 0, posWeight = 0, posSum = 0;
+  for (const d of rows) {
+    const imp = Number(d.impressions) || 0;
+    clicks += Number(d.clicks) || 0;
+    impressions += imp;
+    posWeight += (Number(d.position) || 0) * imp;
+    posSum += Number(d.position) || 0;
+  }
+  const position = impressions > 0 ? posWeight / impressions : posSum / rows.length;
+  return { clicks, impressions, position };
+}
+
+// "12,340 (▲ +8%)" style compare against the previous month; "" without one.
+function vsPrev(cur, prev) {
+  if (prev == null || !(prev > 0)) return "";
+  const pct = Math.round(((cur - prev) / prev) * 100);
+  return ` (${pct > 0 ? "▲ +" : pct < 0 ? "▼ " : ""}${pct}% vs prev month)`;
+}
+
+export default function ClientReport({ client, keywords = [], deliverables = [], backlinks = [], aiCitations = [], reports = [], retainers = [], onChanged }) {
   const [month, setMonth] = useState(ym(new Date()));
   const savedForMonth = reports.find((r) => r.period === month)?.summary || "";
   const [draft, setDraft] = useState(savedForMonth);
@@ -22,8 +54,26 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
   useEffect(() => {
     setDraft(reports.find((r) => r.period === month)?.summary || "");
     setMsg("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month]);
+
+  // Search Console data for the selected month (daily covers ~90 days, so the
+  // previous month is usually in there too). Only fetched once the client is
+  // linked to a GSC property; failures just hide the section.
+  const [gsc, setGsc] = useState(null);
+  useEffect(() => {
+    setGsc(null);
+    if (!String(client.gsc_property || "").trim()) return;
+    let alive = true;
+    gscLoad(client.id, month)
+      .then((r) => { if (alive) setGsc(r); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [client.id, client.gsc_property, month]);
+
+  const gscDaily = gsc?.daily || [];
+  const gscMonth = gscMonthTotals(gscDaily, month);
+  const gscPrev = gscMonthTotals(gscDaily, prevYm(month));
+  const gscQueries = (gsc?.queries || []).slice(0, 10);
 
   const months = (() => {
     const set = new Set([month]);
@@ -40,13 +90,16 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
   // with the Scope section below (both are month-scoped) instead of contradicting it.
   const monthDeliverables = deliverables.filter((d) => deliverableMonth(d) === month);
   const delivered = monthDeliverables.filter((d) => d.status === "delivered").length;
+  // Backlinks placed in the selected month (by placed_date); section hidden when empty.
+  const placedLinks = backlinks.filter((b) => String(b.placed_date || "").slice(0, 7) === month);
+  const ai = aiCitationSummary(aiCitations);
   const scope = scopeRows(retainers, deliverables, client.id, month);
   const dirty = draft !== savedForMonth;
 
   const save = async () => {
     if (busy) return;
     setBusy(true); setMsg("");
-    try { await saveReport(client.id, month, draft); await onChanged(); setMsg("Saved"); toast("Report saved"); }
+    try { await saveReport(client.id, month, draft); await onChanged("client_reports"); setMsg("Saved"); toast("Report saved"); }
     catch (e) { setMsg(e?.message || "Could not save."); toast(e?.message || "Could not save report.", "error"); }
     setBusy(false);
   };
@@ -86,7 +139,8 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
             {ks.total} tracked · <b>{ks.top10}</b> in top 10 · avg rank <b>{ks.avg == null ? "—" : `#${ks.avg}`}</b> · <span style={{ color: netColor }}>{netLabel}</span>
           </div>
           {keywords.length === 0 ? <Empty>No keywords tracked for this client.</Empty> : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <div className="scroll-x">
+            <table style={{ width: "100%", minWidth: 440, borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: "left", borderBottom: BDt }}>
                   <th style={{ padding: "6px 8px" }}>Keyword</th>
@@ -109,8 +163,88 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
+
+        {/* Organic search (Google Search Console) — only when the month has data */}
+        {gscMonth && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", marginBottom: 8 }}>Organic search</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#4b4560", marginBottom: 10 }}>
+              Clicks <b>{gscMonth.clicks.toLocaleString()}</b>{vsPrev(gscMonth.clicks, gscPrev?.clicks)}
+              {" · "}Impressions <b>{gscMonth.impressions.toLocaleString()}</b>{vsPrev(gscMonth.impressions, gscPrev?.impressions)}
+              {" · "}Avg position <b>{gscMonth.position.toFixed(1)}</b>{gscPrev ? ` (prev ${gscPrev.position.toFixed(1)})` : ""}
+            </div>
+            {gscQueries.length > 0 && (
+              <div className="scroll-x">
+              <table style={{ width: "100%", minWidth: 440, borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", borderBottom: BDt }}>
+                    <th style={{ padding: "6px 8px" }}>Top queries</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Clicks</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Impressions</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Avg position</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {gscQueries.map((q) => (
+                    <tr key={q.query} style={{ borderBottom: "1px solid #f0ece2" }}>
+                      <td style={{ padding: "6px 8px", fontWeight: 700, wordBreak: "break-word" }}>{q.query}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 800 }}>{(Number(q.clicks) || 0).toLocaleString()}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right", color: "#6b6580" }}>{(Number(q.impressions) || 0).toLocaleString()}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 800 }}>{q.position == null ? "—" : Number(q.position).toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Link building — only when backlinks were placed in the selected month */}
+        {placedLinks.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", marginBottom: 8 }}>Link building</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#4b4560", marginBottom: 10 }}>
+              <b>{placedLinks.length}</b> backlink{placedLinks.length === 1 ? "" : "s"} placed in {ymLabel(month)}
+            </div>
+            <div className="scroll-x">
+            <table style={{ width: "100%", minWidth: 400, borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ textAlign: "left", borderBottom: BDt }}>
+                  <th style={{ padding: "6px 8px" }}>URL</th>
+                  <th style={{ padding: "6px 8px" }}>Anchor</th>
+                  <th style={{ padding: "6px 8px", textAlign: "right" }}>DR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {placedLinks.map((b) => (
+                  <tr key={b.id} style={{ borderBottom: "1px solid #f0ece2" }}>
+                    <td style={{ padding: "6px 8px", fontWeight: 700, wordBreak: "break-all" }}>{String(b.url || "").replace(/^https?:\/\//, "") || "—"}</td>
+                    <td style={{ padding: "6px 8px", color: "#6b6580" }}>{b.anchor_text || "—"}</td>
+                    <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 800 }}>{b.domain_rating == null ? "—" : b.domain_rating}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            </div>
+          </div>
+        )}
+
+        {/* AI visibility — only when prompts are tracked for this client */}
+        {aiCitations.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", marginBottom: 8 }}>AI visibility</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#4b4560" }}>
+              Cited in <b>{ai.cited}</b> of <b>{ai.total}</b> tracked prompt{ai.total === 1 ? "" : "s"}
+              {ai.byEngine.length > 0 && (
+                <> · {ai.byEngine.map((e) => `${e.label} ${e.cited}/${e.total}`).join(" · ")}</>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Deliverables (this month) */}
         <div style={{ marginBottom: 18 }}>
@@ -137,8 +271,8 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
             <div style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", marginBottom: 8 }}>Scope delivered</div>
             <div style={{ border: BDt, borderRadius: 8, overflow: "hidden" }}>
               {scope.map((r) => (
-                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f0ece2", fontSize: 13 }}>
-                  <span style={{ flex: 1, fontWeight: 700 }}>{typeLabel(r.type)}</span>
+                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid #f0ece2", fontSize: 13, flexWrap: "wrap" }}>
+                  <span style={{ flex: 1, minWidth: 110, fontWeight: 700 }}>{typeLabel(r.type)}</span>
                   <span style={{ color: "#6b6580", fontWeight: 700 }}>{r.delivered} / {r.included}</span>
                   <span style={{ fontWeight: 800, minWidth: 92, textAlign: "right", color: r.state === "over" ? "#c0392b" : r.state === "complete" ? "#1f9d57" : "#6b6580" }}>
                     {r.state === "over" ? `Over +${r.delta}` : r.state === "complete" ? "Complete" : `${Math.max(0, -r.delta)} to go`}

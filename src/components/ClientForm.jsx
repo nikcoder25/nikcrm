@@ -9,7 +9,7 @@ import { Field, Pick, Row, Modal, assigneeOptions } from "./ui";
 export default function ClientForm({ initial, members = [], onClose, onSave }) {
   const [f, setF] = useState(initial || {
     name: "", niche: "", status: "active", source: "Direct", package: "Standard",
-    fee: "", team_member: "", start_month: "", renewal_month: "", risk: "low", notes: "",
+    fee: "", team_member: "", start_month: "", renewal_month: "", risk: "low", notes: "", gsc_property: "",
   });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
@@ -62,6 +62,7 @@ export default function ClientForm({ initial, members = [], onClose, onSave }) {
           ⚠ This client has a monthly fee but no start month. Add one so Monthly Recurring stays accurate.
         </div>
       )}
+      <Field label="Search Console property" value={f.gsc_property || ""} onChange={(v) => set("gsc_property", v)} placeholder="sc-domain:example.com" />
       <label style={lbl} htmlFor="client-notes">Notes</label>
       <textarea id="client-notes" style={{ ...input, minHeight: 60, resize: "vertical" }} value={f.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Notes, special requests..." />
       <button style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 20, justifyContent: "center", opacity: busy ? 0.7 : 1 }} onClick={submit} disabled={busy}>

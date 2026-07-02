@@ -17,7 +17,9 @@ export const activityIcon = (type) => {
 
 // Per-client interaction timeline: log notes / calls / emails / meetings and
 // see them in reverse-chronological order. `activities` arrives already
-// filtered + sorted (happened_at desc) by the parent.
+// filtered + sorted (happened_at desc) by the parent. Mutations ask the
+// Dashboard for a narrow refresh of just the touched datasets (the touchpoint
+// rows plus the audit trail written server-side).
 export default function Activity({ client, activities = [], author = "", onChanged }) {
   const [type, setType] = useState("note");
   const [body, setBody] = useState("");
@@ -42,7 +44,7 @@ export default function Activity({ client, activities = [], author = "", onChang
           follow_up_date: followUp || undefined,
         });
         setBody(""); setWhen(""); setShowWhen(false); setType("note"); setFollowUp("");
-        await onChanged();
+        await onChanged("activities", "activity");
         toast("Activity logged");
       } catch (e) {
         setErr(e?.message || "Something went wrong.");
@@ -55,7 +57,7 @@ export default function Activity({ client, activities = [], author = "", onChang
   const remove = (id) => {
     setBusy(true);
     (async () => {
-      try { await deleteActivity(id); await onChanged(); toast("Activity removed"); }
+      try { await deleteActivity(id); await onChanged("activities", "activity"); toast("Activity removed"); }
       catch (e) { toast(e?.message || "Something went wrong.", "error"); }
       setBusy(false);
     })();
@@ -64,7 +66,7 @@ export default function Activity({ client, activities = [], author = "", onChang
   const clearFollowup = (id) => {
     setBusy(true);
     (async () => {
-      try { await setActivityFollowup(id, null); await onChanged(); toast("Follow-up cleared"); }
+      try { await setActivityFollowup(id, null); await onChanged("activities", "activity"); toast("Follow-up cleared"); }
       catch (e) { toast(e?.message || "Something went wrong.", "error"); }
       setBusy(false);
     })();

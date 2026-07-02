@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, Menu, X } from "lucide-react";
+import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles, Menu, X } from "lucide-react";
 import * as api from "../lib/api";
 import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, iconBtn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
@@ -7,10 +7,13 @@ import { useRouter, clientIdFromPath, clientPath } from "../lib/router";
 import { useToast } from "../lib/toast";
 import { Center, Panel, Empty } from "./ui";
 import Overview from "./Overview";
+import ActivityLog from "./ActivityLog";
 import Clients from "./Clients";
 import Board from "./Board";
 import Deliverables from "./Deliverables";
+import Backlinks from "./Backlinks";
 import Keywords from "./Keywords";
+import AiVisibility from "./AiVisibility";
 import Revenue from "./Revenue";
 import Team from "./Team";
 import ClientForm from "./ClientForm";
@@ -24,12 +27,16 @@ export default function Dashboard({ session, onSignOut }) {
   const [payments, setPayments] = useState([]);
   const [resources, setResources] = useState([]);
   const [deliverables, setDeliverables] = useState([]);
+  const [backlinks, setBacklinks] = useState([]);
   const [keywords, setKeywords] = useState([]);
   const [keywordHistory, setKeywordHistory] = useState([]);
+  const [aiCitations, setAiCitations] = useState([]);
+  const [, setAiCitationHistory] = useState([]);
   const [reports, setReports] = useState([]);
   const [retainers, setRetainers] = useState([]);
+  const [activity, setActivity] = useState([]);          // audit trail (who changed what)
+  const [activities, setActivities] = useState([]);      // client touchpoints (calls/emails/notes)
   const [members, setMembers] = useState([]);
-  const [activities, setActivities] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
   const [tab, setTab] = useState("overview");
   const [loading, setLoading] = useState(true);
@@ -54,27 +61,53 @@ export default function Dashboard({ session, onSignOut }) {
   // Switch tabs, close the mobile drawer, and leave any open detail page.
   const goTab = (k) => { setTab(k); setSidebarOpen(false); if (detailId) navigate("/"); };
 
+  // A 401 means our stored session is no longer valid (e.g. the password was
+  // rotated). Drop the stale session and bounce to the login screen instead of
+  // leaving the user stuck behind a permanent error banner.
   const handleErr = (e, fallback) => {
     if (e?.status === 401) { onSignOut(); return; }
     setError(e?.message || fallback);
   };
 
+  // Dataset name (as the API returns it) → state slice setter. Used by both
+  // the full refresh and the per-entity refresh so they can't drift apart.
+  const SETTERS = {
+    clients: setClients,
+    tasks: setTasks,
+    payments: setPayments,
+    resources: setResources,
+    deliverables: setDeliverables,
+    backlinks: setBacklinks,
+    keywords: setKeywords,
+    keyword_history: setKeywordHistory,
+    ai_citations: setAiCitations,
+    ai_citation_history: setAiCitationHistory,
+    client_reports: setReports,
+    client_retainers: setRetainers,
+    team_members: setMembers,
+    activity: setActivity,
+    activities: setActivities,
+  };
+
   // Fetch fresh data WITHOUT toggling the loading flag, so refreshes after a
-  // mutation don't unmount the whole screen into a "Loading…" flash.
+  // mutation don't unmount the whole screen into a "Loading…" flash. The
+  // full-screen loader is reserved for the very first load.
   const refresh = async () => {
     try {
-      const { clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, team_members, activities } = await api.load();
-      setClients(clients || []);
-      setTasks(tasks || []);
-      setPayments(payments || []);
-      setResources(resources || []);
-      setDeliverables(deliverables || []);
-      setKeywords(keywords || []);
-      setKeywordHistory(keyword_history || []);
-      setReports(client_reports || []);
-      setRetainers(client_retainers || []);
-      setMembers(team_members || []);
-      setActivities(activities || []);
+      const data = await api.load();
+      for (const key of Object.keys(SETTERS)) SETTERS[key](data[key] || []);
+    } catch (e) {
+      handleErr(e, "Could not reach the database.");
+    }
+  };
+
+  // Per-entity refresh: after a mutation, re-fetch only the datasets it
+  // touched (e.g. ["tasks"]) instead of the whole database. The 60s background
+  // sync still does a full refresh, so the other slices never go stale.
+  const refreshSome = async (sets) => {
+    try {
+      const data = await api.loadSome(sets);
+      for (const key of sets) SETTERS[key]?.(data[key] || []);
     } catch (e) {
       handleErr(e, "Could not reach the database.");
     }
@@ -94,46 +127,98 @@ export default function Dashboard({ session, onSignOut }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Background sync so teammates' changes show up without any interaction.
+  // Skipped while the tab is hidden to avoid pointless requests.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   // Throwing save used by modal forms — they manage their own busy/toast/close.
-  const save = async (fn) => {
+  // Pass `sets` for a narrow re-fetch (see `run`), omit it for a full refresh.
+  const save = async (fn, sets) => {
     setError("");
-    try { await fn(); await refresh(); }
+    try { await fn(); await (sets ? refreshSome(sets) : refresh()); }
     catch (e) { if (e?.status === 401) onSignOut(); throw e; }
   };
+
   // Fire-and-forget used by inline actions — toasts the result, never throws.
-  const run = async (fn, okMsg) => {
+  // The follow-up refresh happens in place (no loading flash): pass `sets` with
+  // the datasets the mutation touches for a narrow re-fetch, or omit it for a
+  // full refresh (client save/delete cascade too widely to enumerate). On
+  // failure we always do a FULL refresh, so any optimistic local change rolls
+  // back to server truth. Returns the API result (undefined on failure) so
+  // callers like the bulk-add modal can report success counts.
+  const run = async (fn, sets, okMsg) => {
     setError("");
-    try { await fn(); await refresh(); if (okMsg) toast(okMsg); }
-    catch (e) {
-      if (e?.status === 401) { onSignOut(); return; }
+    try {
+      const result = await fn();
+      await (sets ? refreshSome(sets) : refresh());
+      if (okMsg) toast(okMsg);
+      return result;
+    } catch (e) {
+      if (e?.status === 401) { onSignOut(); return undefined; }
       toast(e?.message || "Something went wrong.", "error");
       await refresh(); // roll back any optimistic change to server truth
+      return undefined;
     }
   };
 
   const saveClient = (c) => save(() => api.saveClient(c.id ? c : { ...c, created_by: session.name }));
-  const delClient = (id) => run(async () => { await api.deleteClient(id); backToClients(); }, "Client deleted");
+  const delClient = (id) => {
+    const c = clients.find((x) => String(x.id) === String(id));
+    if (!window.confirm(`Delete client "${c?.name || "this client"}"? All their tasks, payments, keywords, deliverables and files go with them. This cannot be undone.`)) return;
+    run(async () => { await api.deleteClient(id); backToClients(); }, undefined, "Client deleted");
+  };
 
-  const saveTask = (t) => save(() => api.addTask(t));
-  const delTask = (id) => run(() => api.deleteTask(id), "Task deleted");
+  const saveTask = (t) => save(() => api.addTask(t), ["tasks"]);
+  const delTask = (id) => { if (window.confirm("Delete this task?")) run(() => api.deleteTask(id), ["tasks"], "Task deleted"); };
+  // High-frequency status changes are applied to local state IMMEDIATELY
+  // (optimistic), then synced to the server; on failure `run` resyncs.
   const moveTask = (id, status) => {
     setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status } : t)));
-    run(() => api.moveTask(id, status));
+    run(() => api.moveTask(id, status), ["tasks"]);
   };
   const assignTask = (id, assignee) => {
     setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, assignee } : t)));
-    run(() => api.assignTask(id, assignee));
+    run(() => api.assignTask(id, assignee), ["tasks"]);
   };
 
-  const saveDeliverable = (d) => save(() => (d.id ? api.updateDeliverable(d) : api.createDeliverable(d)));
+  const saveDeliverable = (d) => save(() => (d.id ? api.updateDeliverable(d) : api.createDeliverable(d)), ["deliverables"]);
   const statusDeliverable = (d) => {
     setDeliverables((ds) => ds.map((x) => (x.id === d.id ? { ...x, ...d } : x)));
-    run(() => api.updateDeliverable(d));
+    run(() => api.updateDeliverable(d), ["deliverables"]);
   };
-  const delDeliverable = (id) => run(() => api.deleteDeliverable(id), "Deliverable deleted");
+  const delDeliverable = (id) => { if (window.confirm("Delete this deliverable?")) run(() => api.deleteDeliverable(id), ["deliverables"], "Deliverable deleted"); };
+  // Top up this month's deliverables to every active client's retainer scope.
+  const generateDeliverables = () => run(() => api.generateMonthDeliverables({ all: true, month: ym(new Date()) }), ["deliverables"]);
 
-  const saveKeyword = (k) => save(() => (k.id ? api.updateKeyword(k) : api.createKeyword(k)));
-  const delKeyword = (id) => run(() => api.deleteKeyword(id), "Keyword deleted");
+  const createBacklink = (b) => run(() => api.createBacklink({ ...b, created_by: session.name }), ["backlinks"]);
+  const updateBacklink = (b) => {
+    setBacklinks((bs) => bs.map((x) => (x.id === b.id ? { ...x, ...b } : x)));
+    run(() => api.updateBacklink(b), ["backlinks"]);
+  };
+  const delBacklink = (id) => { if (window.confirm("Delete this backlink?")) run(() => api.deleteBacklink(id), ["backlinks"], "Backlink deleted"); };
+
+  const createAiCitation = (c) => run(() => api.createAiCitation(c), ["ai_citations", "ai_citation_history"]);
+  const updateAiCitation = (c) => {
+    setAiCitations((cs) => cs.map((x) => (x.id === c.id ? { ...x, ...c } : x)));
+    run(() => api.updateAiCitation(c), ["ai_citations", "ai_citation_history"]);
+  };
+  const delAiCitation = (id) => { if (window.confirm("Delete this prompt and its check history?")) run(() => api.deleteAiCitation(id), ["ai_citations", "ai_citation_history"], "Prompt deleted"); };
+
+  const createKeyword = (k) => run(() => api.createKeyword(k), ["keywords", "keyword_history"]);
+  const updateKeyword = (k) => run(() => api.updateKeyword(k), ["keywords", "keyword_history"]);
+  const delKeyword = (id) => { if (window.confirm("Delete this keyword and its rank history?")) run(() => api.deleteKeyword(id), ["keywords", "keyword_history"], "Keyword deleted"); };
+  const bulkAddKeywords = (p) => run(() => api.bulkAddKeywords(p), ["keywords", "keyword_history"]);
+  // Bulk delete is confirmed inside Keywords.jsx (it knows the selection count).
+  const bulkDeleteKeywords = (ids) => run(() => api.bulkDeleteKeywords(ids), ["keywords", "keyword_history"]);
+  const starKeyword = (id, starred) => {
+    setKeywords((ks) => ks.map((k) => (k.id === id ? { ...k, starred } : k)));
+    run(() => api.starKeyword(id, starred), ["keywords", "keyword_history"]);
+  };
 
   const setPayment = (client_id, month, patch) => {
     setPayments((ps) => {
@@ -141,19 +226,22 @@ export default function Dashboard({ session, onSignOut }) {
       if (i >= 0) { const next = [...ps]; next[i] = { ...next[i], ...patch }; return next; }
       return [...ps, { id: `tmp-${client_id}-${month}`, client_id, month, ...patch }];
     });
-    run(() => api.setPayment(client_id, month, patch));
+    run(() => api.setPayment(client_id, month, patch), ["payments"]);
   };
 
-  const saveMember = (m) => save(() => (m.id ? api.updateMember(m) : api.createMember(m)));
-  const delMember = (id) => run(() => api.deleteMember(id), "Team member removed");
+  const saveMember = (m) => save(() => (m.id ? api.updateMember(m) : api.createMember(m)), ["team_members"]);
+  const delMember = (id) => run(() => api.deleteMember(id), ["team_members"], "Team member removed");
 
   const NAV = [
     { k: "overview", l: "Overview", i: LayoutDashboard },
     { k: "clients", l: "Clients", i: FolderKanban },
     { k: "tasks", l: "Task Board", i: CheckSquare },
     { k: "deliverables", l: "Deliverables", i: ClipboardList },
+    { k: "backlinks", l: "Backlinks", i: Link2 },
     { k: "keywords", l: "Keywords", i: Search },
+    { k: "ai", l: "AI Visibility", i: Sparkles },
     { k: "revenue", l: "Revenue", i: DollarSign },
+    { k: "activity", l: "Activity", i: History },
     { k: "team", l: "Team", i: Users },
   ];
 
@@ -223,6 +311,8 @@ export default function Dashboard({ session, onSignOut }) {
                   keywords={keywords.filter((k) => k.client_id === detailClient.id)}
                   keywordHistory={keywordHistory}
                   deliverables={deliverables.filter((d) => d.client_id === detailClient.id)}
+                  backlinks={backlinks.filter((b) => b.client_id === detailClient.id)}
+                  aiCitations={aiCitations.filter((c) => c.client_id === detailClient.id)}
                   reports={reports.filter((r) => r.client_id === detailClient.id)}
                   retainers={retainers.filter((r) => r.client_id === detailClient.id)}
                   activities={activities.filter((a) => a.client_id === detailClient.id)}
@@ -233,7 +323,7 @@ export default function Dashboard({ session, onSignOut }) {
                   onBack={backToClients}
                   onEdit={(c) => { setEditing(c); setShowForm(true); }}
                   onDeleteClient={delClient}
-                  onChanged={refresh}
+                  onChanged={(...sets) => (sets.length ? refreshSome(sets) : refresh())}
                 />
               ) : (
                 <Panel>
@@ -252,13 +342,16 @@ export default function Dashboard({ session, onSignOut }) {
 
             <div style={{ padding: 28 }}>
               {loading ? <Center>Loading your board...</Center> :
-                tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} activities={activities} onNavigate={goTab} onOpenClient={openClient} /> :
+                tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} activities={activities} activity={activity} onNavigate={goTab} onOpenClient={openClient} /> :
                 tab === "clients" ? <Clients clients={clients} deliverables={deliverables} payments={payments} tasks={tasks} keywords={keywords} activities={activities} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} onAdd={openAddClient} /> :
                 tab === "tasks" ? <Board clients={clients} tasks={tasks} members={members} onAdd={saveTask} onMove={moveTask} onAssign={assignTask} onDelete={delTask} /> :
-                tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onSave={saveDeliverable} onStatus={statusDeliverable} onDelete={delDeliverable} /> :
-                tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onSave={saveKeyword} onDelete={delKeyword} /> :
+                tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onSave={saveDeliverable} onStatus={statusDeliverable} onDelete={delDeliverable} onGenerate={generateDeliverables} /> :
+                tab === "backlinks" ? <Backlinks clients={clients} backlinks={backlinks} onCreate={createBacklink} onUpdate={updateBacklink} onDelete={delBacklink} /> :
+                tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
+                tab === "ai" ? <AiVisibility clients={clients} citations={aiCitations} onCreate={createAiCitation} onUpdate={updateAiCitation} onDelete={delAiCitation} /> :
                 tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
-                <Team members={members} clients={clients} tasks={tasks} onSave={saveMember} onDelete={delMember} />}
+                tab === "activity" ? <ActivityLog items={activity} clients={clients} /> :
+                <Team members={members} clients={clients} tasks={tasks} onSave={saveMember} onDelete={delMember} isAdmin={isAdmin} />}
             </div>
           </>
         )}

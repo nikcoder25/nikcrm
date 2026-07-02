@@ -1,5 +1,5 @@
 // Tiny client-side CSV export. Works on already-loaded data — no server round trip.
-import { typeLabel, deliverableStatusLabel } from "./constants";
+import { typeLabel, deliverableStatusLabel, backlinkStatusLabel, aiEngineLabel } from "./constants";
 
 function esc(v) {
   const s = v == null ? "" : String(v);
@@ -63,8 +63,41 @@ export const keywordsCsv = (keywords, clients) => {
     { header: "Current Rank", value: (k) => (k.current_rank == null ? "" : k.current_rank) },
     { header: "Previous Rank", value: (k) => (k.previous_rank == null ? "" : k.previous_rank) },
     { header: "Target URL", value: (k) => k.target_url },
+    { header: "Volume", value: (k) => (k.volume == null ? "" : k.volume) },
+    { header: "Search Engine", value: (k) => k.search_engine || "" },
+    { header: "Location", value: (k) => k.location || "" },
+    { header: "Platform", value: (k) => k.platform || "" },
+    { header: "Starred", value: (k) => (k.starred ? "yes" : "") },
     { header: "Checked At", value: (k) => (k.checked_at ? String(k.checked_at).slice(0, 10) : "") },
     { header: "Notes", value: (k) => k.notes },
+  ]);
+};
+
+export const backlinksCsv = (backlinks, clients) => {
+  const names = namesOf(clients);
+  return toCsv(backlinks, [
+    { header: "Client", value: (b) => names.get(b.client_id) || "" },
+    { header: "URL", value: (b) => b.url },
+    { header: "Target", value: (b) => b.target_url },
+    { header: "Anchor", value: (b) => b.anchor_text },
+    { header: "DR", value: (b) => (b.domain_rating == null ? "" : b.domain_rating) },
+    { header: "Status", value: (b) => backlinkStatusLabel(b.status) },
+    { header: "Cost", value: (b) => b.cost },
+    { header: "Placed", value: (b) => b.placed_date || "" },
+    { header: "Notes", value: (b) => b.notes },
+  ]);
+};
+
+export const aiCitationsCsv = (citations, clients) => {
+  const names = namesOf(clients);
+  return toCsv(citations, [
+    { header: "Client", value: (c) => names.get(c.client_id) || "" },
+    { header: "Prompt", value: (c) => c.prompt },
+    { header: "Engine", value: (c) => aiEngineLabel(c.engine) },
+    { header: "Cited", value: (c) => (c.cited == null ? "" : c.cited ? "yes" : "no") },
+    { header: "Position", value: (c) => (c.position == null ? "" : c.position) },
+    { header: "URL", value: (c) => c.url },
+    { header: "Last checked", value: (c) => (c.checked_at ? String(c.checked_at).slice(0, 10) : "") },
   ]);
 };
 

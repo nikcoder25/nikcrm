@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, CornerDownLeft, FolderKanban, LayoutDashboard } from "lucide-react";
-import { ink, accent, tint, disp, BD, BDt, input } from "../lib/theme";
+import { ink, accent, tint, BD, BDt, input } from "../lib/theme";
 import { STATUS_LABEL } from "../lib/constants";
 
 // Global quick-jump: opens on ⌘K / Ctrl-K, fuzzy-ish filters clients and the

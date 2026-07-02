@@ -57,7 +57,7 @@ export default function Board({ clients, tasks, members = [], onAdd, onMove, onA
     (!filterClient || t.client_id === filterClient) &&
     (!filterAssignee || (filterAssignee === "__none" ? !t.assignee : t.assignee === filterAssignee)) &&
     (!q || `${t.title || ""} ${nameOf(t.client_id)} ${typeLabel(t.type)}`.toLowerCase().includes(q))
-  ), [tasks, filterClient, filterAssignee, q]); // eslint-disable-line react-hooks/exhaustive-deps
+  ), [tasks, clients, filterClient, filterAssignee, q]);
 
   const drop = (colKey) => {
     setOverCol(null);

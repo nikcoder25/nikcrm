@@ -25,6 +25,11 @@ create table if not exists clients (
   created_at timestamptz default now()
 );
 
+-- Google Search Console link: which property this client maps to, e.g.
+-- "sc-domain:example.com" or "https://example.com/". Kept as an ALTER
+-- (mirroring netlify/functions/data.js) so existing databases upgrade in place.
+alter table clients add column if not exists gsc_property text default '';
+
 create table if not exists tasks (
   id uuid primary key default gen_random_uuid(),
   client_id uuid references clients(id) on delete cascade,
@@ -46,6 +51,12 @@ create table if not exists payments (
   created_at timestamptz default now(),
   unique (client_id, month)
 );
+
+-- Stripe payment links (optional; created from the Revenue tab when
+-- STRIPE_SECRET_KEY is set). Kept as ALTERs (mirroring
+-- netlify/functions/data.js) so existing databases upgrade in place.
+alter table payments add column if not exists stripe_link_url text default '';
+alter table payments add column if not exists stripe_link_id text default '';
 
 -- Per-client resources: pasted links and uploaded files. File bytes live in
 -- Netlify Blobs; this row holds the metadata and the blob key.
@@ -77,8 +88,9 @@ create table if not exists deliverables (
   created_at timestamptz default now()
 );
 
--- Keywords: manual keyword-rank tracking per client. On each rank change the
--- API rolls current_rank into previous_rank so movement stays meaningful.
+-- Keywords: keyword-rank tracking per client (manual edits + optional scheduled
+-- DataForSEO checks). On each rank change the API rolls current_rank into
+-- previous_rank so movement stays meaningful.
 create table if not exists keywords (
   id uuid primary key default gen_random_uuid(),
   client_id uuid references clients(id) on delete cascade,
@@ -91,12 +103,63 @@ create table if not exists keywords (
   created_at timestamptz default now()
 );
 
+-- Serpfox-style tracking metadata, added after the initial release. Kept as
+-- ALTERs (mirroring netlify/functions/data.js) so existing databases upgrade
+-- in place with no manual step.
+alter table keywords add column if not exists search_engine text default 'www.google.com';
+alter table keywords add column if not exists location text default '';         -- e.g. "Washington, United States"
+alter table keywords add column if not exists platform text default 'desktop';  -- 'desktop' | 'mobile'
+alter table keywords add column if not exists volume integer;                   -- monthly search volume (manual entry)
+alter table keywords add column if not exists starred boolean default false;
+alter table keywords add column if not exists auto_track boolean default false; -- include in scheduled DataForSEO checks
+
 -- Keyword rank history: one row appended each time a keyword's rank changes to a
 -- real value (on create and on rank-changing updates). Powers the trend chart.
 create table if not exists keyword_history (
   id uuid primary key default gen_random_uuid(),
   keyword_id uuid references keywords(id) on delete cascade,
   rank integer,
+  recorded_at timestamptz default now()
+);
+
+-- Backlinks: per-client link-building tracker (manual entry).
+create table if not exists backlinks (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  url text default '',                     -- the page the link lives on
+  target_url text default '',              -- the client page it points at
+  anchor_text text default '',
+  domain_rating integer,                   -- 0–100; null = unknown
+  status text default 'live',              -- prospect / outreach / placed / live / lost
+  cost numeric default 0,
+  notes text default '',
+  placed_date date,
+  created_by text default '',
+  created_at timestamptz default now()
+);
+
+-- AI visibility (AEO): whether a client gets cited in AI answers (ChatGPT,
+-- Perplexity, Google AI Overviews, Claude, Gemini) for given prompts. Each row
+-- is the CURRENT state per prompt+engine; changes to cited/position append a
+-- history row (same semantics as keyword ranks and keyword_history).
+create table if not exists ai_citations (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  prompt text default '',
+  engine text default 'chatgpt',           -- chatgpt / perplexity / google_ai / claude / gemini / other
+  cited boolean,                           -- null = not checked yet
+  position integer,                        -- position within the AI answer's citations
+  url text default '',                     -- the client URL the answer cites
+  checked_at timestamptz,                  -- when cited/position was last recorded
+  notes text default '',
+  created_at timestamptz default now()
+);
+
+create table if not exists ai_citation_history (
+  id uuid primary key default gen_random_uuid(),
+  citation_id uuid references ai_citations(id) on delete cascade,
+  cited boolean,
+  position integer,
   recorded_at timestamptz default now()
 );
 
@@ -122,6 +185,61 @@ create table if not exists client_retainers (
   quantity integer default 0,
   created_at timestamptz default now(),
   unique (client_id, type)
+);
+
+-- Google Search Console organic performance, filled nightly by the scheduled
+-- function (netlify/functions/gsc-sync.mjs) when GSC_SERVICE_ACCOUNT_JSON is
+-- set. gsc_daily keeps one row per client per day (rolling window, upserted);
+-- gsc_queries keeps the top queries per client per month (replaced on sync).
+create table if not exists gsc_daily (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  date date not null,
+  clicks integer default 0,
+  impressions integer default 0,
+  ctr real default 0,
+  position real default 0,
+  unique (client_id, date)
+);
+
+create table if not exists gsc_queries (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  month text not null,                     -- 'YYYY-MM'
+  query text not null,
+  clicks integer default 0,
+  impressions integer default 0,
+  position real default 0,
+  unique (client_id, month, query)
+);
+
+-- Per-user accounts (optional — the shared APP_PASSWORD login keeps working
+-- regardless). Managed by admins from the Team tab. Passwords are stored as
+-- scrypt hashes (hex hash + hex salt), never plaintext, and the hash/salt
+-- columns are never returned by any API action.
+create table if not exists users (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  email text not null unique,
+  password_hash text not null,
+  password_salt text not null,
+  role text default 'member',              -- member | admin
+  active boolean default true,
+  created_at timestamptz default now()
+);
+
+-- Activity log (audit trail): who did what, when. client_id has NO foreign
+-- key on purpose — activity must survive client deletion, so the readable
+-- name is recorded in entity_label/detail instead.
+create table if not exists activity (
+  id uuid primary key default gen_random_uuid(),
+  actor text default '',
+  verb text not null,
+  entity text not null,
+  entity_label text default '',
+  client_id uuid,
+  detail text default '',
+  created_at timestamptz default now()
 );
 
 -- Team roster: assignees are real records. clients.team_member and
@@ -152,8 +270,8 @@ create table if not exists activities (
 -- ============================================================
 -- Indexes. Postgres does not auto-index FK columns; without these,
 -- per-client lookups and ON DELETE CASCADE degrade linearly with data size.
--- (payments, client_reports and client_retainers are covered by their
--- unique constraints, which lead with client_id.)
+-- (payments, client_reports, client_retainers, gsc_daily and gsc_queries are
+-- covered by their unique constraints, which lead with client_id.)
 -- ============================================================
 create index if not exists idx_tasks_client on tasks (client_id);
 create index if not exists idx_resources_client on resources (client_id);
@@ -162,5 +280,9 @@ create index if not exists idx_deliverables_client on deliverables (client_id);
 create index if not exists idx_keywords_client on keywords (client_id);
 create index if not exists idx_keyword_history_kw on keyword_history (keyword_id);
 create index if not exists idx_keyword_history_time on keyword_history (recorded_at);
+create index if not exists idx_backlinks_client on backlinks (client_id);
+create index if not exists idx_ai_citations_client on ai_citations (client_id);
+create index if not exists idx_ai_citation_history_cit on ai_citation_history (citation_id);
+create index if not exists idx_activity_time on activity (created_at desc);
 create index if not exists idx_activities_client on activities (client_id);
 create index if not exists idx_activities_time on activities (happened_at);

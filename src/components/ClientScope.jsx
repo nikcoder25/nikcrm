@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Trash2 } from "lucide-react";
-import { accent, tint, disp, BDt, btn, iconBtn, sel, input } from "../lib/theme";
+import { Plus, Trash2, CalendarPlus } from "lucide-react";
+import { accent, ink, tint, disp, BDt, btn, iconBtn, sel, input } from "../lib/theme";
 import { TASK_TYPES, typeLabel } from "../lib/constants";
 import { ym, ymLabel } from "../lib/format";
 import { scopeRows } from "../lib/scope";
-import { saveRetainer, deleteRetainer } from "../lib/api";
+import { saveRetainer, deleteRetainer, generateMonthDeliverables } from "../lib/api";
 import { useToast } from "../lib/toast";
 import { Empty } from "./ui";
 
@@ -32,6 +32,7 @@ export default function ClientScope({ client, retainers = [], deliverables = [],
   const [addQty, setAddQty] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [genMsg, setGenMsg] = useState("");
   const toast = useToast();
 
   const rows = scopeRows(retainers, deliverables, client.id, month);
@@ -39,14 +40,22 @@ export default function ClientScope({ client, retainers = [], deliverables = [],
   const available = TASK_TYPES.filter((t) => !usedTypes.has(t.key));
 
   const guard = async (fn, okMsg) => {
-    setErr(""); setBusy(true);
+    setErr(""); setGenMsg(""); setBusy(true);
     try { await fn(); if (okMsg) toast(okMsg); }
     catch (e) { setErr(e?.message || "Something went wrong."); toast(e?.message || "Something went wrong.", "error"); }
     setBusy(false);
   };
-  const add = () => { if (!addType) return; guard(async () => { await saveRetainer(client.id, addType, Number(addQty) || 0); setAddType(""); setAddQty(""); onChanged(); }, "Scope added"); };
-  const setQty = (type, qty) => guard(async () => { await saveRetainer(client.id, type, qty); onChanged(); }, "Scope updated");
-  const remove = (id) => guard(async () => { await deleteRetainer(id); onChanged(); }, "Scope removed");
+  const add = () => { if (!addType) return; guard(async () => { await saveRetainer(client.id, addType, Number(addQty) || 0); setAddType(""); setAddQty(""); onChanged("client_retainers"); }, "Scope added"); };
+  const setQty = (type, qty) => guard(async () => { await saveRetainer(client.id, type, qty); onChanged("client_retainers"); }, "Scope updated");
+  const remove = (id) => guard(async () => { await deleteRetainer(id); onChanged("client_retainers"); }, "Scope removed");
+  // Top up the selected month's deliverables to this client's retainer scope.
+  const generate = () => guard(async () => {
+    const { created } = await generateMonthDeliverables({ client_id: client.id, month });
+    onChanged("deliverables");
+    setGenMsg(created > 0
+      ? `Created ${created} deliverable${created === 1 ? "" : "s"} from the retainer scope.`
+      : `${ymLabel(month)} already matches the retainer scope — nothing to create.`);
+  });
 
   const months = (() => {
     const set = new Set([month]); const now = new Date();
@@ -63,8 +72,14 @@ export default function ClientScope({ client, retainers = [], deliverables = [],
         <select style={{ ...sel, flex: "none", minWidth: 140 }} value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Scope month">
           {months.map((m) => <option key={m} value={m}>{ymLabel(m)}</option>)}
         </select>
+        {rows.length > 0 && (
+          <button style={btn("#fff", ink)} disabled={busy} title="Create the missing deliverables for this month from the retainer scope" onClick={generate}>
+            <CalendarPlus size={15} /> Generate for {ymLabel(month)}
+          </button>
+        )}
       </div>
       {err && <div style={{ background: tint, border: BDt, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
+      {genMsg && <div style={{ background: "#d7f5df", border: BDt, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>{genMsg}</div>}
 
       {rows.length === 0 ? (
         <Empty>No scope set. Add the deliverable types included in this client's monthly retainer.</Empty>
