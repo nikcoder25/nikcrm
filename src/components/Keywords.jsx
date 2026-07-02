@@ -343,9 +343,11 @@ export function keywordSummary(keywords) {
   return { total: keywords.length, ranked: ranked.length, avg, top10 };
 }
 
-/* ---------------- Serpfox-style bulk add modal ---------------- */
-function AddKeywordsModal({ clients, onClose, onBulkAdd }) {
-  const [f, setF] = useState({ client_id: "", target_url: "", keywords: "", search_engine: "www.google.com", platform: "desktop", location: "" });
+/* ---------------- Serpfox-style bulk add modal ----------------
+   `initial` presets fields (e.g. the URL + client of the group the "Add
+   keywords" button was clicked in), so adding to an existing URL is one paste. */
+function AddKeywordsModal({ clients, initial, onClose, onBulkAdd }) {
+  const [f, setF] = useState({ client_id: "", target_url: "", keywords: "", search_engine: "www.google.com", platform: "desktop", location: "", ...initial });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null); // { ok, text }
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
@@ -433,7 +435,7 @@ function BulkActions({ ids, onStar, onBulkDelete, onDone }) {
   );
 }
 
-function KeywordTable({ items, byKw, period, onEdit, onDelete, onStar, onBulkDelete }) {
+function KeywordTable({ items, byKw, period, onEdit, onDelete, onStar, onBulkDelete, onAdd }) {
   const [filter, setFilter] = useState("");
   const [checked, setChecked] = useState(() => new Set());
   const [openKw, setOpenKw] = useState(null);
@@ -462,6 +464,11 @@ function KeywordTable({ items, byKw, period, onEdit, onDelete, onStar, onBulkDel
           <input style={{ ...input, padding: "9px 12px 9px 32px", fontSize: 12.5 }} placeholder="Type to filter keywords" value={filter} onChange={(e) => setFilter(e.target.value)} />
         </div>
         <BulkActions ids={checkedVisible} onStar={onStar} onBulkDelete={onBulkDelete} onDone={() => setChecked(new Set())} />
+        {onAdd && (
+          <button style={{ ...btn(GREEN, "#fff"), padding: "8px 13px", fontSize: 12.5 }} onClick={onAdd}>
+            <Plus size={14} /> Add keywords
+          </button>
+        )}
       </div>
       <div className="scroll-x">
         <div style={{ minWidth: 950 }}>
@@ -558,13 +565,20 @@ function groupStats(items, period, byKw) {
   return { change, up, same, down, high, low };
 }
 
-/* ---------------- Keywords tab ---------------- */
+/* ---------------- Rank Tracker tab (Serpfox-style) ----------------
+   Two views over the same tracked keywords, like Serpfox's By URL / By Group:
+   - "By URL": one row per tracked target domain, whoever the client is.
+   - "By Client": one row per client (this app's natural "group").
+   Both share the period toggle, filter, movement bars and the expandable
+   keyword table with bulk actions and inline rank-history charts. */
 export default function Keywords({ clients, keywords, history = [], onCreate, onUpdate, onDelete, onBulkAdd, onBulkDelete, onStar }) {
+  const [mode, setMode] = useState("url");          // "url" | "client"
   const [period, setPeriod] = useState("last");
   const [urlFilter, setUrlFilter] = useState("");
-  const [openGroup, setOpenGroup] = useState(null); // client id — one open at a time
-  const [showAdd, setShowAdd] = useState(false);
+  const [openGroup, setOpenGroup] = useState(null); // group key — one open at a time
+  const [showAdd, setShowAdd] = useState(null);     // null = closed; {} or a preset {client_id, target_url}
   const [editing, setEditing] = useState(null);
+  const switchMode = (m) => { setMode(m); setOpenGroup(null); };
 
   const byKw = useMemo(() => {
     const m = new Map();
@@ -572,7 +586,28 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
     return m;
   }, [history]);
 
-  const groups = useMemo(() => clients
+  const clientName = useMemo(() => new Map(clients.map((c) => [c.id, c.name])), [clients]);
+
+  // One group per tracked target domain; keywords without a target URL pool
+  // in a "(no target URL)" bucket at the end.
+  const urlGroups = useMemo(() => {
+    const m = new Map();
+    for (const k of keywords) {
+      const d = domainOf(k.target_url) || "(no target URL)";
+      if (!m.has(d)) m.set(d, []);
+      m.get(d).push(k);
+    }
+    return [...m.entries()]
+      .map(([domain, items]) => ({
+        key: `url:${domain}`,
+        title: domain,
+        hint: [...new Set(items.map((k) => clientName.get(k.client_id)).filter(Boolean))].join(" · "),
+        items,
+      }))
+      .sort((a, b) => (a.title === "(no target URL)") - (b.title === "(no target URL)") || a.title.localeCompare(b.title));
+  }, [keywords, clientName]);
+
+  const clientGroups = useMemo(() => clients
     .map((c) => {
       const items = keywords.filter((k) => k.client_id === c.id);
       // The group's "URL" is the most common non-empty target domain.
@@ -580,13 +615,28 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
       for (const k of items) { const d = domainOf(k.target_url); if (d) counts.set(d, (counts.get(d) || 0) + 1); }
       let domain = "", n = 0;
       for (const [d, cnt] of counts) if (cnt > n) { domain = d; n = cnt; }
-      return { client: c, items, domain };
+      return { key: `client:${c.id}`, title: c.name, hint: domain, items };
     })
     .filter((g) => g.items.length > 0), [clients, keywords]);
 
+  const groups = mode === "url" ? urlGroups : clientGroups;
+
+  // Preset for the per-group "Add keywords" button: the group's dominant
+  // client and target URL, so adding to an existing URL is one paste.
+  const presetFor = (g) => {
+    const cCounts = new Map(), uCounts = new Map();
+    for (const k of g.items) {
+      cCounts.set(k.client_id, (cCounts.get(k.client_id) || 0) + 1);
+      const u = String(k.target_url || "").trim();
+      if (u) uCounts.set(u, (uCounts.get(u) || 0) + 1);
+    }
+    const top = (m) => { let best = "", n = 0; for (const [v, c] of m) if (c > n) { best = v; n = c; } return best; };
+    return { client_id: top(cCounts) || "", target_url: top(uCounts) };
+  };
+
   const q = urlFilter.trim().toLowerCase();
   const visibleGroups = q
-    ? groups.filter((g) => g.client.name.toLowerCase().includes(q) || g.domain.toLowerCase().includes(q))
+    ? groups.filter((g) => g.title.toLowerCase().includes(q) || (g.hint || "").toLowerCase().includes(q))
     : groups;
 
   const s = keywordSummary(keywords);
@@ -600,10 +650,20 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
         <RevCard icon={ArrowUp} label="In top 10" val={String(s.top10)} hint="rank 1–10" />
       </div>
 
+      {/* Serpfox-style view switch */}
+      <div style={{ display: "flex", borderBottom: "2px solid #e3ddce", marginBottom: 16 }}>
+        {[["url", "By URL"], ["client", "By Client"]].map(([k, l]) => (
+          <button key={k} onClick={() => switchMode(k)} aria-current={mode === k ? "page" : undefined}
+            style={{ padding: "9px 2px 7px", marginRight: 26, background: "none", border: "none", borderBottom: mode === k ? `3px solid ${accent}` : "3px solid transparent", color: mode === k ? ink : GRAY, fontFamily: disp, fontSize: 13, textTransform: "uppercase", cursor: "pointer" }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
         <div style={{ position: "relative", flex: 1, minWidth: 200, maxWidth: 340 }}>
           <Search size={15} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#a39db5" }} />
-          <input style={{ ...input, padding: "10px 12px 10px 34px" }} placeholder="Type to filter URLs" value={urlFilter} onChange={(e) => setUrlFilter(e.target.value)} />
+          <input style={{ ...input, padding: "10px 12px 10px 34px" }} placeholder={mode === "url" ? "Type to filter URLs" : "Type to filter clients"} value={urlFilter} onChange={(e) => setUrlFilter(e.target.value)} />
         </div>
         <span style={{ flex: 1 }} />
         <div style={{ display: "flex", border: BDt, borderRadius: 9, overflow: "hidden" }}>
@@ -612,7 +672,7 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
           ))}
         </div>
         <button style={btn("#fff", ink)} disabled={keywords.length === 0} onClick={() => downloadCsv("keywords.csv", keywordsCsv(keywords, clients))}><Download size={15} /> Export CSV</button>
-        <button style={btn(GREEN, "#fff")} disabled={clients.length === 0} onClick={() => setShowAdd(true)}><Plus size={16} /> Add keywords</button>
+        <button style={btn(GREEN, "#fff")} disabled={clients.length === 0} onClick={() => setShowAdd({})}><Plus size={16} /> Add keywords</button>
       </div>
 
       {clients.length === 0 ? (
@@ -620,13 +680,13 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
       ) : groups.length === 0 ? (
         <Panel><Empty>No keywords yet. Tap "Add keywords" and paste one keyword per line.</Empty></Panel>
       ) : visibleGroups.length === 0 ? (
-        <Panel><Empty>No URLs match "{urlFilter}".</Empty></Panel>
+        <Panel><Empty>No {mode === "url" ? "URLs" : "clients"} match "{urlFilter}".</Empty></Panel>
       ) : (
         <Panel>
           <div className="scroll-x">
           <div style={{ minWidth: 660 }}>
           <div style={{ display: "grid", gridTemplateColumns: GROUP_GRID, gap: 10, alignItems: "center", padding: "12px 20px", borderBottom: BD }}>
-            <span style={th}>URL / Client</span>
+            <span style={th}>{mode === "url" ? "URL" : "Client"}</span>
             <span style={th}>Change</span>
             <span style={{ ...th, textAlign: "right" }}>High</span>
             <span style={{ ...th, textAlign: "right" }}>Low</span>
@@ -634,20 +694,21 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
             <span style={th}>Movement</span>
             <span />
           </div>
-          {visibleGroups.map(({ client, items, domain }) => {
+          {visibleGroups.map((grp) => {
+            const { key, title, hint, items } = grp;
             const g = groupStats(items, period, byKw);
-            const isOpen = openGroup === client.id;
+            const isOpen = openGroup === key;
             const changeColor = g.change > 0 ? GREEN : g.change < 0 ? RED : GRAY;
             const changeLabel = g.change > 0 ? `↑${g.change}` : g.change < 0 ? `↓${-g.change}` : "0";
             return (
-              <React.Fragment key={client.id}>
+              <React.Fragment key={key}>
                 <div
                   style={{ display: "grid", gridTemplateColumns: GROUP_GRID, gap: 10, alignItems: "center", padding: "13px 20px", borderBottom: "2px solid #f0ece2", cursor: "pointer", background: isOpen ? tint : "transparent" }}
-                  onClick={() => setOpenGroup(isOpen ? null : client.id)}
+                  onClick={() => setOpenGroup(isOpen ? null : key)}
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{client.name}</div>
-                    {domain && <div style={{ fontSize: 11.5, color: GRAY, fontWeight: 700, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{domain}</div>}
+                    <div style={{ fontWeight: 800, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{title}</div>
+                    {hint && <div style={{ fontSize: 11.5, color: GRAY, fontWeight: 700, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{hint}</div>}
                   </div>
                   <span style={{ fontSize: 13.5, fontWeight: 900, color: changeColor }}>{changeLabel}</span>
                   <span style={{ fontSize: 13, fontWeight: 800, textAlign: "right" }}>{rankLabel(g.high)}</span>
@@ -665,6 +726,7 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
                     onDelete={onDelete}
                     onStar={onStar}
                     onBulkDelete={onBulkDelete}
+                    onAdd={() => setShowAdd(presetFor(grp))}
                   />
                 )}
               </React.Fragment>
@@ -675,8 +737,8 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
         </Panel>
       )}
 
-      {showAdd && (
-        <AddKeywordsModal clients={clients} onClose={() => setShowAdd(false)} onBulkAdd={onBulkAdd} />
+      {showAdd !== null && (
+        <AddKeywordsModal clients={clients} initial={showAdd} onClose={() => setShowAdd(null)} onBulkAdd={onBulkAdd} />
       )}
 
       {editing && (

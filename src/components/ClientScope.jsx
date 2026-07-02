@@ -64,7 +64,7 @@ export default function ClientScope({ client, retainers = [], deliverables = [],
   })();
 
   return (
-    <div style={{ marginTop: 22 }}>
+    <div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>
           Scope / retainer

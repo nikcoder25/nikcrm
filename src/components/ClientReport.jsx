@@ -109,7 +109,7 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
   const netColor = netImprovement > 0 ? "#1f9d57" : netImprovement < 0 ? "#c0392b" : "#6b6580";
 
   return (
-    <div style={{ marginTop: 22 }}>
+    <div>
       {/* controls (not printed) */}
       <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>

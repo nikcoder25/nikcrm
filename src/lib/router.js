@@ -23,13 +23,24 @@ export function useRouter() {
   return { path, navigate };
 }
 
-// /clients/:id -> ":id" (string) for any other path -> null.
+// /clients/:id or /clients/:id/:tab -> ":id" (string); any other path -> null.
 export function clientIdFromPath(path) {
-  const m = /^\/clients\/([^/]+)\/?$/.exec(path || "");
+  const m = /^\/clients\/([^/]+)(?:\/([^/]+))?\/?$/.exec(path || "");
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-export const clientPath = (id) => `/clients/${encodeURIComponent(id)}`;
+// /clients/:id/:tab -> ":tab" (string); /clients/:id (no tab) or any other
+// path -> null. The client workspace maps this onto its tab bar so each tab
+// is linkable and survives a refresh.
+export function clientTabFromPath(path) {
+  const m = /^\/clients\/([^/]+)\/([^/]+)\/?$/.exec(path || "");
+  return m ? decodeURIComponent(m[2]) : null;
+}
+
+// The default tab ("overview") stays off the URL so existing /clients/:id
+// links keep working and there's exactly one canonical URL for it.
+export const clientPath = (id, tab) =>
+  `/clients/${encodeURIComponent(id)}` + (tab && tab !== "overview" ? `/${encodeURIComponent(tab)}` : "");
 
 // /portal/:token -> ":token" (string); any other path -> null. The public
 // read-only client portal renders instead of the login/dashboard flow.
