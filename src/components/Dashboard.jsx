@@ -152,11 +152,14 @@ export default function Dashboard({ session, onSignOut }) {
   }, []);
 
   // Background sync so teammates' changes show up without any interaction.
-  // Skipped while the tab is hidden to avoid pointless requests.
+  // Skipped while the tab is hidden to avoid pointless requests. 3 minutes:
+  // each tick re-downloads every dataset, so a tighter loop multiplies into
+  // real function-invocation + bandwidth spend on metered hosts (a 60s loop
+  // is what exhausted the free tier). Mutations already refresh instantly.
   useEffect(() => {
     const id = setInterval(() => {
       if (document.visibilityState === "visible") refresh();
-    }, 60_000);
+    }, 180_000);
     return () => clearInterval(id);
   }, []);
 

@@ -60,18 +60,26 @@ alter table payments add column if not exists stripe_link_url text default '';
 alter table payments add column if not exists stripe_link_id text default '';
 
 -- Per-client resources: pasted links and uploaded files. File bytes live in
--- Netlify Blobs; this row holds the metadata and the blob key.
+-- the file_blobs table below; this row holds the metadata and the blob key.
 create table if not exists resources (
   id uuid primary key default gen_random_uuid(),
   client_id uuid references clients(id) on delete cascade,
   kind text default 'link',               -- 'link' | 'file'
   label text default '',
   url text default '',                     -- external URL for links
-  blob_key text default '',                -- Netlify Blobs key for uploaded files
+  blob_key text default '',                -- file_blobs.key for uploaded files
   filename text default '',
   content_type text default '',
   size integer default 0,
   created_by text default '',
+  created_at timestamptz default now()
+);
+
+-- Uploaded file bytes, stored in-database so the API runs the same on any
+-- host (no blob-storage service). No FK: cleaned up explicitly by the API.
+create table if not exists file_blobs (
+  key text primary key,
+  data bytea not null,
   created_at timestamptz default now()
 );
 

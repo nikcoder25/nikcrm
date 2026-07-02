@@ -33,6 +33,16 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 
 ---
 
+## Hosting options
+
+The app runs on either of two setups — same code, same database:
+
+1. **Netlify** (below): functions + hosting in one place.
+2. **Hostinger + Cloudflare Workers**: static frontend on any web hosting
+   (e.g. Hostinger shared/cloud), the API as a free Cloudflare Worker —
+   see **[HOSTINGER-DEPLOY.md](HOSTINGER-DEPLOY.md)**. Useful when Netlify's
+   free-tier limits are a problem (Workers' free tier is 100k requests/day).
+
 ## Deploy it on Netlify (about 10 minutes, one time)
 
 ### 1. Get the code on Netlify

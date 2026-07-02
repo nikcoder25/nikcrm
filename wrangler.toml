@@ -1,0 +1,30 @@
+# Cloudflare Worker config for the Growth Atlas API (see worker/index.js and
+# HOSTINGER-DEPLOY.md). Deploy with:  npx wrangler deploy
+#
+# Secrets (never put real values here — set each with `npx wrangler secret put NAME`):
+#   NETLIFY_DATABASE_URL   Neon Postgres connection string (required)
+#   APP_PASSWORD           shared team password              (required)
+#   ADMIN_PASSWORD         admin password                    (optional)
+#   SESSION_SECRET         session-token signing key         (recommended)
+#   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI   (optional)
+#   STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET                       (optional)
+#   DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD                          (optional)
+#   RESEND_API_KEY / REPORT_FROM_EMAIL / DIGEST_EMAIL               (optional)
+#   GSC_SERVICE_ACCOUNT_JSON                                        (optional)
+
+name = "growth-atlas-api"
+main = "worker/index.js"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# The origin(s) the frontend is served from — REQUIRED for the browser to be
+# allowed to call this API. Comma-separate several. Example:
+# ALLOWED_ORIGIN = "https://yourdomain.com,https://www.yourdomain.com"
+ALLOWED_ORIGIN = ""
+# White-label name for client portal pages (optional).
+# AGENCY_NAME = "Your Agency"
+
+# Scheduled jobs (UTC) — must match the cron strings in worker/index.js.
+[triggers]
+crons = ["30 5 * * *", "0 6 * * *", "0 7 * * *", "0 8 1 * *"]
