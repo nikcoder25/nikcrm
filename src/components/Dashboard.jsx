@@ -287,7 +287,7 @@ export default function Dashboard({ session, onSignOut }) {
                 tab === "ai" ? <AiVisibility clients={clients} citations={aiCitations} onCreate={createAiCitation} onUpdate={updateAiCitation} onDelete={delAiCitation} /> :
                 tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
                 tab === "activity" ? <Activity items={activity} clients={clients} /> :
-                <Team clients={clients} tasks={tasks} />}
+                <Team clients={clients} tasks={tasks} isAdmin={isAdmin} />}
             </div>
           </>
         )}

@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { neon } from "@netlify/neon";
+import { newPasswordRecord, verifyPassword, signToken, verifyToken } from "../lib/auth.js";
 import { getStore } from "@netlify/blobs";
 import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, BACKLINK_STATES, AI_ENGINES, typeLabel } from "../../src/lib/constants.js";
 import { lastDayOfMonth } from "../../src/lib/format.js";
@@ -211,6 +212,19 @@ async function ensureSchema(sql) {
     position real default 0,
     unique (client_id, month, query)
   )`;
+  // Per-user accounts (optional — the shared APP_PASSWORD login keeps working
+  // regardless). Passwords are stored as scrypt hashes, never plaintext, and
+  // the hash/salt columns are never selected by any client-facing query.
+  await sql`create table if not exists users (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    email text not null unique,
+    password_hash text not null,
+    password_salt text not null,
+    role text default 'member',              -- member | admin
+    active boolean default true,
+    created_at timestamptz default now()
+  )`;
   // Audit trail. client_id has NO foreign key on purpose: activity must
   // survive client deletion, so the human-readable name lives in
   // entity_label/detail instead of being joined at read time.
@@ -318,6 +332,9 @@ const DELIVERABLE_STATE_KEYS = DELIVERABLE_STATES.map((s) => s.key);
 const BACKLINK_STATE_KEYS = BACKLINK_STATES.map((s) => s.key);
 const AI_ENGINE_KEYS = AI_ENGINES.map((e) => e.key);
 const KEYWORD_PLATFORMS = ["desktop", "mobile"];
+const USER_ROLES = ["member", "admin"];
+// Loose email shape check — one @, something either side, a dot in the domain.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function badEnum(field, value, allowed) {
   if (value === undefined || value === null || value === "") return null;
   return allowed.includes(value) ? null : json({ error: `Invalid ${field}: ${value}` }, 400);
@@ -370,14 +387,60 @@ function toCited(v) {
 }
 
 // Auth model: a shared team password gates everything. An optional separate
-// admin password unlocks destructive actions (deleting clients).
+// admin password unlocks destructive actions (deleting clients). On top of
+// that, optional per-user accounts (users table, email + personal password)
+// sign in through the same login action and get the same signed session token.
 //
-// If NO password is configured we FAIL CLOSED: the API refuses every request
+// If NO secret is configured we FAIL CLOSED: the API refuses every request
 // with a clear operator message. A misconfigured deploy (forgotten or mistyped
 // APP_PASSWORD) must never silently expose the whole database to the public.
 // For local dev, set APP_PASSWORD in .env (see .env.example).
 function authConfigured() {
   return Boolean(process.env.APP_PASSWORD || process.env.ADMIN_PASSWORD);
+}
+
+// Signing secret for session tokens. Prefer a dedicated SESSION_SECRET env
+// var; without one, fall back to a key derived from the env passwords so
+// tokens work with zero new configuration. (With the fallback, rotating either
+// password invalidates every outstanding session — a feature.) Returns null
+// when there is no secret material at all: then no token can be issued OR
+// accepted, keeping the fail-closed guarantee.
+function sessionSecret() {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  if (authConfigured()) {
+    return `ga-session-v1:${process.env.APP_PASSWORD || ""}:${process.env.ADMIN_PASSWORD || ""}`;
+  }
+  return null;
+}
+
+// Request authentication, used by both GET and POST: the Bearer session token
+// (preferred) or the legacy x-app-password header (kept so browsers that
+// logged in before the token rollout keep working until their next login).
+// Returns { role, name, userId } or null. userId is null for shared-password
+// and legacy sessions.
+function authenticate(req) {
+  const header = req.headers.get("authorization") || "";
+  const bearer = header.replace(/^Bearer\s+/i, "").trim();
+  if (bearer && bearer !== header) {
+    const secret = sessionSecret();
+    const data = secret ? verifyToken(bearer, secret) : null;
+    if (!data) return null;
+    return {
+      role: data.role,
+      name: String(data.name || ""),
+      userId: data.sub && data.sub !== "shared" ? data.sub : null,
+    };
+  }
+  const role = resolveRole(req.headers.get("x-app-password") || "");
+  return role ? { role, name: "", userId: null } : null;
+}
+
+// Throwaway scrypt record used to keep "unknown email" and "wrong password"
+// responses the same speed, so login timing can't enumerate accounts.
+let _dummyRecord;
+function dummyRecord() {
+  if (!_dummyRecord) _dummyRecord = newPasswordRecord(crypto.randomUUID());
+  return _dummyRecord;
 }
 
 // Constant-time string compare so response timing can't leak how much of the
@@ -430,8 +493,8 @@ export default async (req) => {
   // GET is used only to download an uploaded file (streamed as its real bytes,
   // not JSON). Still password-gated, like every other request.
   if (req.method === "GET") {
-    if (!authConfigured()) return json({ error: NOT_CONFIGURED }, 503);
-    if (!resolveRole(req.headers.get("x-app-password") || "")) return json({ error: "Unauthorized" }, 401);
+    if (!sessionSecret()) return json({ error: NOT_CONFIGURED }, 503);
+    if (!authenticate(req)) return json({ error: "Unauthorized" }, 401);
     if (!process.env.NETLIFY_DATABASE_URL) return json({ error: "Database not configured. Set NETLIFY_DATABASE_URL." }, 503);
     const key = new URL(req.url).searchParams.get("key") || "";
     if (!key) return json({ error: "Missing file key" }, 400);
@@ -465,17 +528,65 @@ export default async (req) => {
   try { body = await req.json(); } catch { body = {}; }
   const { action, payload = {} } = body;
 
-  // Login: validate the password and hand back the role for the UI.
+  // Login: validate the credentials and hand back { ok, role, name, token }.
+  // Two flavors share one action and one brute-force throttle:
+  //   payload.email set   → per-user account (email + personal password)
+  //   payload.password    → shared team password (the original flow, unchanged)
   if (action === "login") {
-    if (!authConfigured()) return json({ error: NOT_CONFIGURED }, 503);
     const ip = clientIp(req);
+
+    // Per-user login. Deliberately NOT gated on authConfigured(): it must keep
+    // working when the env passwords are removed and only user accounts
+    // remain — but that setup requires SESSION_SECRET, otherwise there is no
+    // signing key and we fail closed like everything else.
+    if (payload.email) {
+      const secret = sessionSecret();
+      if (!secret) return json({ error: NOT_CONFIGURED }, 503);
+      if (!process.env.NETLIFY_DATABASE_URL) {
+        return json({ error: "Database not configured. Set NETLIFY_DATABASE_URL." }, 503);
+      }
+      if (loginBlocked(ip)) return json({ error: "Too many attempts. Try again in a few minutes." }, 429);
+      try {
+        const sql = db();
+        await ensureSchema(sql);
+        const email = String(payload.email).trim().toLowerCase();
+        const rows = await sql`select id, name, role, password_hash, password_salt
+          from users where lower(email)=${email} and active limit 1`;
+        // Unknown email still burns one scrypt (against a throwaway record) so
+        // the response takes the same time either way — no account enumeration.
+        let ok;
+        if (rows.length) {
+          ok = verifyPassword(payload.password || "", rows[0].password_salt, rows[0].password_hash);
+        } else {
+          const dummy = dummyRecord();
+          verifyPassword(payload.password || "", dummy.salt, dummy.hash);
+          ok = false;
+        }
+        if (!ok) {
+          noteLoginFail(ip);
+          return json({ error: "Wrong email or password." }, 401);
+        }
+        const role = rows[0].role === "admin" ? "admin" : "member";
+        const name = rows[0].name || "Team member";
+        const token = signToken({ sub: rows[0].id, name, role }, secret);
+        return json({ ok: true, role, name, token });
+      } catch (e) {
+        return json({ error: String(e?.message || e) }, 500);
+      }
+    }
+
+    // Shared team password — same checks as always, now also issuing a token
+    // (sub "shared", the display name the person typed on the login screen).
+    if (!authConfigured()) return json({ error: NOT_CONFIGURED }, 503);
     if (loginBlocked(ip)) return json({ error: "Too many attempts. Try again in a few minutes." }, 429);
     const role = resolveRole(payload.password || "");
     if (!role) {
       noteLoginFail(ip);
       return json({ error: "Wrong password. Ask your team lead for it." }, 401);
     }
-    return json({ ok: true, role });
+    const name = String(payload.name || "").trim().slice(0, 80) || "Team member";
+    const token = signToken({ sub: "shared", name, role }, sessionSecret());
+    return json({ ok: true, role, name, token });
   }
 
   // Read-only client portal. The token in the URL is the whole credential, so
@@ -484,7 +595,7 @@ export default async (req) => {
   // per-IP counter as login so tokens can't be guessed by brute force. Unknown
   // and disabled tokens both return the same 404 on purpose.
   if (action === "portalLoad") {
-    if (!authConfigured()) return json({ error: NOT_CONFIGURED }, 503);
+    if (!sessionSecret()) return json({ error: NOT_CONFIGURED }, 503);
     if (!process.env.NETLIFY_DATABASE_URL) {
       return json({ error: "Database not configured. Set NETLIFY_DATABASE_URL." }, 503);
     }
@@ -532,12 +643,13 @@ export default async (req) => {
     }
   }
 
-  // Every other action requires a valid password in the header.
-  if (!authConfigured()) return json({ error: NOT_CONFIGURED }, 503);
-  const pw = req.headers.get("x-app-password") || "";
-  const role = resolveRole(pw);
-  if (!role) return json({ error: "Unauthorized" }, 401);
-  const isAdmin = role === "admin";
+  // Every other action requires a valid session token (or the legacy password
+  // header). sessionSecret() doubles as the fail-closed configuration guard:
+  // it's null only when neither env passwords nor SESSION_SECRET exist.
+  if (!sessionSecret()) return json({ error: NOT_CONFIGURED }, 503);
+  const auth = authenticate(req);
+  if (!auth) return json({ error: "Unauthorized" }, 401);
+  const isAdmin = auth.role === "admin";
 
   // Fail fast with a friendly 503 (not a raw @netlify/neon stack trace) when the
   // database connection string is absent. Provision Netlify DB, or set
@@ -546,8 +658,10 @@ export default async (req) => {
     return json({ error: "Database not configured. Set NETLIFY_DATABASE_URL." }, 503);
   }
 
-  // Who did it, for the activity log. Sent by the frontend on every call.
-  const actor = String(payload._actor || "").trim().slice(0, 80);
+  // Who did it, for the activity log: the authenticated session's name when we
+  // have one (token sessions carry it), else the display name the frontend
+  // sends. The authenticated name wins — it can't be spoofed via the payload.
+  const actor = (auth.name || String(payload._actor || "")).trim().slice(0, 80);
 
   try {
     const sql = db();
@@ -624,7 +738,7 @@ export default async (req) => {
             values (${c.name}, ${c.niche || ""}, ${c.status || "active"}, ${c.source || "Direct"},
                     ${c.package || "Standard"}, ${Number(c.fee) || 0}, ${c.team_member || ""},
                     ${c.start_month || ""}, ${c.renewal_month || ""}, ${c.risk || "low"},
-                    ${c.notes || ""}, ${gscProperty}, ${c.created_by || ""}) returning id`;
+                    ${c.notes || ""}, ${gscProperty}, ${auth.name || c.created_by || ""}) returning id`;
           await logActivity(sql, { actor, verb: "created client", entity: "client", entity_label: c.name, client_id: ins[0]?.id });
         }
         return json({ ok: true });
@@ -738,7 +852,7 @@ export default async (req) => {
         const linkUrl = safeHttpUrl(r.url);
         if (!linkUrl) return json({ error: "Links must be http(s) URLs." }, 400);
         await sql`insert into resources (client_id, kind, label, url, created_by)
-          values (${r.client_id}, 'link', ${r.label || ""}, ${linkUrl}, ${r.created_by || ""})`;
+          values (${r.client_id}, 'link', ${r.label || ""}, ${linkUrl}, ${auth.name || r.created_by || ""})`;
         await logActivity(sql, { actor, verb: "added link", entity: "resource", entity_label: r.label || linkUrl, client_id: r.client_id });
         return json({ ok: true });
       }
@@ -757,7 +871,7 @@ export default async (req) => {
           (client_id, kind, label, blob_key, filename, content_type, size, created_by)
           values (${r.client_id}, 'file', ${r.label || r.filename || "File"}, ${key},
                   ${r.filename || "file"}, ${r.content_type || "application/octet-stream"},
-                  ${buffer.length}, ${r.created_by || ""})`;
+                  ${buffer.length}, ${auth.name || r.created_by || ""})`;
         await logActivity(sql, { actor, verb: "uploaded file", entity: "resource", entity_label: r.label || r.filename || "File", client_id: r.client_id });
         return json({ ok: true });
       }
@@ -861,7 +975,7 @@ export default async (req) => {
           (client_id, url, target_url, anchor_text, domain_rating, status, cost, notes, placed_date, created_by)
           values (${b.client_id}, ${linkUrl}, ${targetUrl}, ${b.anchor_text || ""}, ${dr},
                   ${b.status || "live"}, ${Number(b.cost) || 0}, ${b.notes || ""},
-                  ${b.placed_date || null}, ${b.created_by || ""})`;
+                  ${b.placed_date || null}, ${auth.name || b.created_by || ""})`;
         await logActivity(sql, { actor, verb: "added backlink", entity: "backlink", entity_label: linkUrl || b.anchor_text || "", client_id: b.client_id });
         return json({ ok: true });
       }
@@ -1128,6 +1242,65 @@ export default async (req) => {
           where client_id=${payload.client_id}`;
         const pc = await sql`select name from clients where id=${payload.client_id} limit 1`;
         await logActivity(sql, { actor, verb: `${payload.enabled ? "enabled" : "disabled"} portal link for`, entity: "portal", entity_label: pc[0]?.name || "", client_id: payload.client_id });
+        return json({ ok: true });
+      }
+
+      /* -------- per-user accounts (admin-only management) -------- */
+      // None of these ever select password_hash / password_salt: hashes must
+      // never reach the client, even for admins.
+
+      case "userList": {
+        if (!isAdmin) return json({ error: "Only an admin can manage user accounts." }, 403);
+        const users = await sql`select id, name, email, role, active, created_at
+          from users order by created_at`;
+        return json({ users });
+      }
+
+      case "userSave": {
+        if (!isAdmin) return json({ error: "Only an admin can manage user accounts." }, 403);
+        const u = payload;
+        const name = String(u.name || "").trim().slice(0, 80);
+        const email = String(u.email || "").trim().toLowerCase();
+        const userRole = u.role || "member";
+        if (!name) return json({ error: "The user's name is required." }, 400);
+        if (!EMAIL_RE.test(email)) return json({ error: "Enter a valid email address." }, 400);
+        const bad = badEnum("role", userRole, USER_ROLES);
+        if (bad) return bad;
+        const active = u.active === undefined ? true : Boolean(u.active);
+        const password = String(u.password || "");
+        if (password && password.length < 8) return json({ error: "Password must be at least 8 characters." }, 400);
+        // Friendly duplicate check instead of a raw unique-violation error.
+        const clash = await sql`select 1 from users
+          where email=${email} and id is distinct from ${u.id || null}::uuid limit 1`;
+        if (clash.length) return json({ error: "That email is already in use." }, 400);
+        if (u.id) {
+          // Update; an empty password means "leave the password unchanged".
+          const found = await sql`select 1 from users where id=${u.id} limit 1`;
+          if (!found.length) return json({ error: "User not found." }, 404);
+          if (password) {
+            const { salt, hash } = newPasswordRecord(password);
+            await sql`update users set name=${name}, email=${email}, role=${userRole},
+              active=${active}, password_hash=${hash}, password_salt=${salt} where id=${u.id}`;
+          } else {
+            await sql`update users set name=${name}, email=${email}, role=${userRole},
+              active=${active} where id=${u.id}`;
+          }
+          await logActivity(sql, { actor, verb: "updated user account", entity: "user", entity_label: `${name} (${email})` });
+        } else {
+          if (!password) return json({ error: "A password is required for a new user." }, 400);
+          const { salt, hash } = newPasswordRecord(password);
+          await sql`insert into users (name, email, password_hash, password_salt, role, active)
+            values (${name}, ${email}, ${hash}, ${salt}, ${userRole}, ${active})`;
+          await logActivity(sql, { actor, verb: "created user account", entity: "user", entity_label: `${name} (${email})` });
+        }
+        return json({ ok: true });
+      }
+
+      case "userDelete": {
+        if (!isAdmin) return json({ error: "Only an admin can manage user accounts." }, 403);
+        if (!payload.id) return json({ error: "Missing user id." }, 400);
+        const gone = await sql`delete from users where id=${payload.id} returning name, email`;
+        if (gone.length) await logActivity(sql, { actor, verb: "deleted user account", entity: "user", entity_label: `${gone[0].name} (${gone[0].email})` });
         return json({ ok: true });
       }
 

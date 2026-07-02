@@ -9,8 +9,8 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 
 ## What you get
 - **Overview**: a home dashboard with rollup KPIs (clients, open tasks, deliverables delivered/overdue, MRR + collected, avg keyword rank) and a **"Needs attention"** list of everything overdue
-- **Team login** with one shared password (set an optional second password for admins)
-- **Roles**: admins can delete clients; everyone else can do everything else
+- **Team login** with one shared password (set an optional second password for admins), plus optional **per-user accounts** (email + personal password, managed by admins from the Team tab) — see [Per-user accounts](#per-user-accounts)
+- **Roles**: admins can delete clients and manage user accounts; everyone else can do everything else
 - **Clients**: add, edit, delete — status, source, package, team, dates, notes, monthly fee
 - **Monthly Report**: inside each client's detail view, generate a printable monthly snapshot — keyword rankings (current/previous/movement, top-10, avg, net improvement), deliverables with a delivered/total rollup, and a saved free-text "wins" narrative. **Print / Export** opens a clean print-friendly layout (Save as PDF)
 - **Client detail view**: click any client to see everything in one place, plus a **Resources** panel — attach links (Google Drive, Canva, Sheets…) *and* upload job files (stored in Netlify Blobs, up to 4 MB each)
@@ -44,6 +44,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Project configuration → Environment variables → Add a variable**:
   - `APP_PASSWORD` — the shared password your team logs in with.
   - `ADMIN_PASSWORD` — *(optional)* a separate password that unlocks deleting clients. Skip it and everyone with `APP_PASSWORD` can delete too.
+  - `SESSION_SECRET` — *(optional but recommended)* a long random string (e.g. `openssl rand -hex 32`) used to sign login session tokens. Without it, the signing key is derived from `APP_PASSWORD` + `ADMIN_PASSWORD` so everything works with zero extra config — but then changing either password signs everyone out, and per-user login ([see below](#per-user-accounts)) stops working if you ever remove the shared passwords. Set it once and forget it.
   - `AGENCY_NAME` — *(optional)* the agency name shown on client portal pages (defaults to "Growth Atlas"). Portal share links themselves need no setup — they're unguessable per-client tokens you create in the app, and you can disable or regenerate them at any time to revoke access.
   - `STRIPE_SECRET_KEY` — *(optional)* your Stripe secret key; enables the "Payment link" buttons on the Revenue tab. Skip it and the feature stays hidden.
   - `STRIPE_WEBHOOK_SECRET` — *(optional, but needed for auto-marking paid)* the signing secret of a Stripe **webhook endpoint** (Stripe dashboard → Developers → Webhooks) pointed at `https://YOUR-SITE/api/stripe-webhook` and listening to the `checkout.session.completed` event. When a client pays through their link, the matching payment flips to **Paid** by itself.
@@ -65,6 +66,27 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 1. Send them the live link and the shared **team password**.
 2. Each person enters their name + the password and starts working the board.
 3. Give the **admin password** only to people who should be able to delete clients.
+
+Or skip the shared password for day-to-day use and give people **personal accounts** — see the next section.
+
+---
+
+## Per-user accounts
+
+Optional personal logins (email + password) that live **alongside** the shared team password — nothing changes for teams that keep using the shared password, and both can be used at the same time while you migrate.
+
+**Create the first user:**
+1. Log in with the shared password using the **admin** password (the "Team password" tab on the login screen).
+2. Open the **Team** tab → **User accounts** panel → **Add user**. Enter their name, email, a password (min 8 characters) and a role (**Member** or **Admin**).
+3. That person can now sign in via the **"My account"** tab on the login screen with their email + password. Their name and role come from their account (no more typing a name at login).
+
+**Managing accounts** (admins only, Team tab): deactivate an account to block new logins without deleting it, reactivate it later, or delete it outright. Leaving the password blank when editing keeps the current password; filling it in resets it.
+
+**Good to know:**
+- Passwords are stored as salted **scrypt hashes** — never plaintext — and hashes are never sent to the browser.
+- Logins hand the browser a signed, stateless **session token** (valid 30 days) instead of storing the password. Set `SESSION_SECRET` (recommended) so tokens survive password rotations; without it the signing key falls back to `APP_PASSWORD` + `ADMIN_PASSWORD`, which works with zero extra config but ties every session's validity to those passwords.
+- Because tokens are stateless, **deactivating or deleting a user blocks their next login but does not kill an already-issued token** (up to 30 days). To revoke sessions immediately, rotate `SESSION_SECRET` (or the shared passwords, if you're on the fallback) and redeploy — that invalidates every outstanding token.
+- **Migration / going passwordless:** once everyone has an account you *can* remove `APP_PASSWORD` / `ADMIN_PASSWORD` — but only if `SESSION_SECRET` is set, otherwise there is no signing key and the API fails closed for everyone. Removing the shared passwords disables the "Team password" login (and any browsers still on old shared-password sessions); email login keeps working.
 
 ---
 
@@ -89,6 +111,8 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
 ├── vite.config.js          Vite + React setup
 ├── .env.example            Local dev env template (APP_PASSWORD / ADMIN_PASSWORD)
 ├── netlify/
+│   ├── lib/
+│   │   └── auth.js         Pure auth helpers: scrypt hashing + signed session tokens
 │   └── functions/
 │       ├── data.js         API: auth check + all DB reads/writes (Neon)
 │       ├── rank-check.mjs  Scheduled daily DataForSEO rank checks (optional)
@@ -108,7 +132,7 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
     │   ├── scope.js        Retainer scope vs delivered logic
     │   └── theme.js        Colors, borders, shared style tokens, global CSS
     └── components/         One file per screen / shared UI
-        ├── Login.jsx           Name + team password
+        ├── Login.jsx           Team password or personal account login
         ├── Dashboard.jsx       Shell, nav, data loading, tab routing
         ├── Overview.jsx        Home dashboard: KPI rollups + overdue list
         ├── Activity.jsx        Activity feed (audit trail)
@@ -129,7 +153,7 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
 ---
 
 ## Notes
-- **Security model.** This is a lightweight internal tool: access is gated by a shared password that the browser sends with each API request, and the database is only reachable through the Netlify Function — never directly from the browser. Set strong passwords and share them carefully. For per-person accounts you'd add a real auth provider later.
+- **Security model.** This is a lightweight internal tool: access is gated by a shared team password and/or per-user accounts. Logging in hands the browser a signed 30-day session token that it sends with each API request (the raw password is not stored in the browser), and the database is only reachable through the Netlify Function — never directly from the browser. Set strong passwords and share them carefully.
 - **Uploaded files** are stored in **Netlify Blobs**, which is enabled automatically for any site with functions — no setup. Downloads are also password-gated (served through the function, never a public URL). Limit is 4 MB per file; for bigger assets, attach a link instead.
 - **Keyword ranks are entered manually by default**; keywords with "Auto-check rank" ticked are refreshed daily by the scheduled DataForSEO function when `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` are set. Either way, when a keyword's rank changes the old value automatically rolls into "previous" so the up/down movement stays meaningful.
 - **Built for 100+ clients.** All foreign keys are indexed (auto-created like the tables), status changes apply instantly (optimistic UI with background sync), refreshes never blank the screen, and every list has search/filter controls.

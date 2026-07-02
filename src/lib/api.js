@@ -9,14 +9,22 @@ export function getSession() {
 function saveSession(s) { localStorage.setItem(KEY, JSON.stringify(s)); }
 export function signOut() { localStorage.removeItem(KEY); }
 
+// Auth header for API calls. New sessions carry a signed token (sent as a
+// Bearer header); sessions saved before the token rollout only have the shared
+// password, so keep sending the legacy header until the next login — nobody
+// gets force-signed-out by the upgrade.
+function authHeaders() {
+  const s = getSession();
+  if (s?.token) return { authorization: `Bearer ${s.token}` };
+  if (s?.password) return { "x-app-password": s.password };
+  return {};
+}
+
 async function call(action, payload) {
   const s = getSession();
   const res = await fetch("/api/data", {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(s?.password ? { "x-app-password": s.password } : {}),
-    },
+    headers: { "content-type": "application/json", ...authHeaders() },
     // _actor = the display name shown in the activity log for this action.
     body: JSON.stringify({ action, payload: { ...payload, _actor: s?.name } }),
   });
@@ -29,15 +37,26 @@ async function call(action, payload) {
   return data;
 }
 
-export async function login(name, password) {
+// Two login flavors, one function: pass `email` to sign in with a personal
+// account (email + password), omit it for the shared team password (name +
+// password). Stores { name, role, token } — never the raw password, unless the
+// server didn't return a token (older deploy) and we need the legacy fallback.
+export async function login(name, password, email) {
+  const payload = email
+    ? { email: email.trim(), password }
+    : { name: (name || "").trim(), password };
   const res = await fetch("/api/data", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "login", payload: { password } }),
+    body: JSON.stringify({ action: "login", payload }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Login failed");
-  const session = { name: (name || "").trim() || "Team member", role: data.role, password };
+  const session = {
+    name: data.name || (name || "").trim() || "Team member",
+    role: data.role,
+    ...(data.token ? { token: data.token } : { password }),
+  };
   saveSession(session);
   return session;
 }
@@ -86,9 +105,8 @@ export async function uploadResourceFile(client_id, file, label) {
 // Download an uploaded file: fetch it with the auth header, then hand back a
 // temporary object URL the browser can open or save.
 export async function fetchFileObjectUrl(blobKey) {
-  const s = getSession();
   const res = await fetch(`/api/data?key=${encodeURIComponent(blobKey)}`, {
-    headers: { ...(s?.password ? { "x-app-password": s.password } : {}) },
+    headers: authHeaders(),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -163,6 +181,13 @@ export async function portalLoad(token) {
   }
   return data;
 }
+
+/* ---------------- user accounts (admin-only management) ---------------- */
+export const userList = () => call("userList");
+// { id?, name, email, role, active, password? } — password required on create,
+// blank on update = leave unchanged.
+export const saveUser = (u) => call("userSave", u);
+export const deleteUser = (id) => call("userDelete", { id });
 
 /* ---------------- monthly report email recipient ---------------- */
 export const getReportEmail = (client_id) => call("reportEmailGet", { client_id });

@@ -212,6 +212,21 @@ create table if not exists gsc_queries (
   unique (client_id, month, query)
 );
 
+-- Per-user accounts (optional — the shared APP_PASSWORD login keeps working
+-- regardless). Managed by admins from the Team tab. Passwords are stored as
+-- scrypt hashes (hex hash + hex salt), never plaintext, and the hash/salt
+-- columns are never returned by any API action.
+create table if not exists users (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  email text not null unique,
+  password_hash text not null,
+  password_salt text not null,
+  role text default 'member',              -- member | admin
+  active boolean default true,
+  created_at timestamptz default now()
+);
+
 -- Activity log (audit trail): who did what, when. client_id has NO foreign
 -- key on purpose — activity must survive client deletion, so the readable
 -- name is recorded in entity_label/detail instead.
