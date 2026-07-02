@@ -1,21 +1,56 @@
-import React from "react";
-import { DollarSign, Wallet, Check, Download } from "lucide-react";
-import { ink, accent, disp, BD, BDt, SH, sel, btn } from "../lib/theme";
+import React, { useState } from "react";
+import { DollarSign, Wallet, Check, Download, Link2, ExternalLink } from "lucide-react";
+import { ink, accent, tint, disp, BD, BDt, SH, sel, btn, iconBtn } from "../lib/theme";
 import { PAY_STATES } from "../lib/constants";
 import { money, ym, ymLabel } from "../lib/format";
 import { downloadCsv, paymentsCsv } from "../lib/csv";
+import { createPaymentLink } from "../lib/api";
 import { Panel, Empty, RevCard } from "./ui";
 
 /* ---------------- Revenue ---------------- */
 export default function Revenue({ clients, payments, month, setMonth, onSet }) {
+  // Stripe payment links are handled here directly (not through Dashboard's
+  // run()), like ClientDetail's guard(): local error + per-row busy/feedback.
+  // linkUrls caches URLs created this session until the next data refresh.
+  const [linkErr, setLinkErr] = useState("");
+  const [stripeOff, setStripeOff] = useState(false); // 503 → feature not configured, hide the buttons
+  const [linkBusy, setLinkBusy] = useState("");
+  const [linkMsg, setLinkMsg] = useState({ key: "", text: "" });
+  const [linkUrls, setLinkUrls] = useState({});
+
   const active = clients.filter((c) => c.status === "active");
   const payOf = (cid) => payments.find((p) => p.client_id === cid && p.month === month);
   const mrr = active.reduce((s, c) => s + (Number(c.fee) || 0), 0);
 
   const monthPays = active.map((c) => {
     const p = payOf(c.id);
-    return { client: c, amount: p ? Number(p.amount) : Number(c.fee) || 0, status: p ? p.status : "pending" };
+    return { client: c, amount: p ? Number(p.amount) : Number(c.fee) || 0, status: p ? p.status : "pending", linkUrl: p?.stripe_link_url || linkUrls[c.id + "|" + month] || "" };
   });
+
+  const flashMsg = (key, text) => {
+    setLinkMsg({ key, text });
+    setTimeout(() => setLinkMsg((m) => (m.key === key ? { key: "", text: "" } : m)), 1800);
+  };
+  const payLink = async (client, linkUrl) => {
+    const key = client.id + "|" + month;
+    setLinkErr("");
+    try {
+      if (linkUrl) {
+        await navigator.clipboard.writeText(linkUrl);
+        flashMsg(key, "Copied!");
+        return;
+      }
+      setLinkBusy(key);
+      const { url } = await createPaymentLink(client.id, month);
+      setLinkUrls((m) => ({ ...m, [key]: url }));
+      await navigator.clipboard.writeText(url);
+      flashMsg(key, "Link created & copied");
+    } catch (e) {
+      if (e?.status === 503) setStripeOff(true); // not configured — say it once, then hide the feature
+      setLinkErr(e?.message || "Could not create the payment link.");
+    }
+    setLinkBusy("");
+  };
   const collected = monthPays.filter((x) => x.status === "paid").reduce((s, x) => s + x.amount, 0);
   const pending = monthPays.filter((x) => x.status !== "paid").reduce((s, x) => s + x.amount, 0);
 
@@ -62,12 +97,31 @@ export default function Revenue({ clients, payments, month, setMonth, onSet }) {
 
       <Panel>
         <div style={{ padding: "16px 20px", fontFamily: disp, fontSize: 15, textTransform: "uppercase", borderBottom: BD }}>Payments · {ymLabel(month)}</div>
-        {active.length === 0 ? <Empty>No active clients.</Empty> : monthPays.map(({ client, status }) => (
+        {linkErr && <div style={{ background: tint, border: BDt, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, margin: "12px 20px 0" }}>{linkErr}</div>}
+        {active.length === 0 ? <Empty>No active clients.</Empty> : monthPays.map(({ client, status, linkUrl }) => (
           <div key={client.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px", borderBottom: "2px solid #f0ece2" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 800, fontSize: 14.5 }}>{client.name}</div>
               <div style={{ fontSize: 12.5, color: "#6b6580", fontWeight: 600 }}>{client.source} · {money(client.fee)}/mo</div>
             </div>
+            {status !== "paid" && !stripeOff && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button onClick={() => payLink(client, linkUrl)} disabled={linkBusy === client.id + "|" + month}
+                  title={linkUrl ? "Copy the Stripe payment link" : "Create a Stripe payment link and copy it"}
+                  style={{ ...iconBtn, alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 800, padding: "6px 9px",
+                    color: linkMsg.key === client.id + "|" + month ? accent : ink,
+                    opacity: linkBusy === client.id + "|" + month ? 0.6 : 1 }}>
+                  <Link2 size={13} />
+                  {linkMsg.key === client.id + "|" + month ? linkMsg.text : linkBusy === client.id + "|" + month ? "Creating…" : "Payment link"}
+                </button>
+                {linkUrl && (
+                  <a href={linkUrl} target="_blank" rel="noreferrer" title="Open the payment link"
+                    style={{ ...iconBtn, padding: 6, textDecoration: "none" }}>
+                    <ExternalLink size={13} />
+                  </a>
+                )}
+              </div>
+            )}
             <div style={{ display: "flex", gap: 6 }}>
               {PAY_STATES.map((ps) => (
                 <button key={ps.key} onClick={() => onSet(client.id, month, { amount: Number(client.fee) || 0, status: ps.key })}

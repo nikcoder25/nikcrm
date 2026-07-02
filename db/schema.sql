@@ -47,6 +47,12 @@ create table if not exists payments (
   unique (client_id, month)
 );
 
+-- Stripe payment links (optional; created from the Revenue tab when
+-- STRIPE_SECRET_KEY is set). Kept as ALTERs (mirroring
+-- netlify/functions/data.js) so existing databases upgrade in place.
+alter table payments add column if not exists stripe_link_url text default '';
+alter table payments add column if not exists stripe_link_id text default '';
+
 -- Per-client resources: pasted links and uploaded files. File bytes live in
 -- Netlify Blobs; this row holds the metadata and the blob key.
 create table if not exists resources (

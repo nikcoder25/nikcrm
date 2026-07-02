@@ -19,7 +19,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Deliverables**: track what you owe each client — type, quantity, due date, and status (Planned / In Progress / Delivered / Blocked), grouped by client with a per-client delivered/total summary
 - **Retainer / scope tracking**: set each client's agreed monthly scope (included quantity per deliverable type) and see included-vs-delivered per month with an **over scope / complete / to-go** flag — catches scope creep. Surfaced in the client detail, the Monthly Report, and the Overview's "Needs attention" list
 - **Keywords**: a Serpfox-style rank tracker. The tab groups keywords **by URL/client** — net change, best/worst rank, keyword count and a green/gray/red movement bar per group — with a **Last / Week / Month** period toggle. Expanding a group shows every keyword with rank, change, **search volume, search engine, location and desktop/mobile platform**, a per-keyword **rank-over-time chart** (rank 1 on top, date ticks, zoom), **starring**, and **bulk actions** (star / unstar / delete selected). **Bulk add** pastes up to 200 keywords at once (one per line, shared target URL / engine / location / platform). Optional **automatic daily rank checks** via DataForSEO: set `DATAFORSEO_LOGIN` + `DATAFORSEO_PASSWORD` env vars and tick "Auto-check rank" on a keyword — a scheduled function (`netlify/functions/rank-check.mjs`, 06:00 UTC) looks up the target domain's live Google/Bing position and records the history; without the keys, tracking stays fully manual. Also surfaced inside each client's detail view
-- **Revenue**: MRR, collected vs pending per month, revenue by source, and a per-client payment tracker (Pending / Paid / Overdue)
+- **Revenue**: MRR, collected vs pending per month, revenue by source, and a per-client payment tracker (Pending / Paid / Overdue). Optional **Stripe payment links**: with `STRIPE_SECRET_KEY` set, every unpaid row gets a "Payment link" button that creates (once) and copies a Stripe Payment Link for that client's monthly fee — and a webhook (`/api/stripe-webhook`) marks the payment **Paid automatically** when the client pays. Without the key the buttons simply don't appear
 - **Team** view: who has how many clients and tasks
 
 ---
@@ -41,6 +41,9 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
   - `APP_PASSWORD` — the shared password your team logs in with.
   - `ADMIN_PASSWORD` — *(optional)* a separate password that unlocks deleting clients. Skip it and everyone with `APP_PASSWORD` can delete too.
   - `AGENCY_NAME` — *(optional)* the agency name shown on client portal pages (defaults to "Growth Atlas"). Portal share links themselves need no setup — they're unguessable per-client tokens you create in the app, and you can disable or regenerate them at any time to revoke access.
+  - `STRIPE_SECRET_KEY` — *(optional)* your Stripe secret key; enables the "Payment link" buttons on the Revenue tab. Skip it and the feature stays hidden.
+  - `STRIPE_WEBHOOK_SECRET` — *(optional, but needed for auto-marking paid)* the signing secret of a Stripe **webhook endpoint** (Stripe dashboard → Developers → Webhooks) pointed at `https://YOUR-SITE/api/stripe-webhook` and listening to the `checkout.session.completed` event. When a client pays through their link, the matching payment flips to **Paid** by itself.
+  - `STRIPE_CURRENCY` — *(optional)* currency for payment links (defaults to `usd`).
 
 ### 4. Deploy
 - **Deploys → Trigger deploy → Deploy site.** You get a public link.
@@ -80,7 +83,8 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
 ├── netlify/
 │   └── functions/
 │       ├── data.js         API: auth check + all DB reads/writes (Neon)
-│       └── rank-check.mjs  Scheduled daily DataForSEO rank checks (optional)
+│       ├── rank-check.mjs  Scheduled daily DataForSEO rank checks (optional)
+│       └── stripe-webhook.mjs  Stripe webhook: marks payments paid (optional)
 ├── db/
 │   ├── schema.sql          Reference schema (auto-created by the function)
 │   └── seed-clients.sql    Optional: preload clients

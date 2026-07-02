@@ -48,6 +48,9 @@ export const addTask = (t) => call("taskAdd", t);
 export const moveTask = (id, status) => call("taskMove", { id, status });
 export const deleteTask = (id) => call("taskDelete", { id });
 export const setPayment = (client_id, month, patch) => call("paymentSet", { client_id, month, ...patch });
+// Stripe payment link for one client + month. Returns { url }; 503 with a
+// friendly message when STRIPE_SECRET_KEY isn't configured.
+export const createPaymentLink = (client_id, month) => call("paymentLinkCreate", { client_id, month });
 
 /* ---------------- resources (links + uploaded files) ---------------- */
 export const MAX_FILE_BYTES = 4 * 1024 * 1024;

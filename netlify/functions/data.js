@@ -63,6 +63,10 @@ async function ensureSchema(sql) {
     created_at timestamptz default now(),
     unique (client_id, month)
   )`;
+  // Stripe payment links (optional; created from the Revenue tab when
+  // STRIPE_SECRET_KEY is set). ALTER ... IF NOT EXISTS upgrades in place.
+  await sql`alter table payments add column if not exists stripe_link_url text default ''`;
+  await sql`alter table payments add column if not exists stripe_link_id text default ''`;
   await sql`create table if not exists resources (
     id uuid primary key default gen_random_uuid(),
     client_id uuid references clients(id) on delete cascade,
@@ -194,6 +198,22 @@ const KEYWORD_PLATFORMS = ["desktop", "mobile"];
 function badEnum(field, value, allowed) {
   if (value === undefined || value === null || value === "") return null;
   return allowed.includes(value) ? null : json({ error: `Invalid ${field}: ${value}` }, 400);
+}
+
+// Minimal Stripe REST call — form-encoded POST, no SDK. Throws with Stripe's
+// own error message so the UI shows something actionable.
+async function stripePost(path, params) {
+  const res = await fetch(`https://api.stripe.com${path}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams(params),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message || `Stripe error (HTTP ${res.status})`);
+  return data;
 }
 
 // Rank is a positive integer or null (unranked). Coerce loosely from the UI.
@@ -472,6 +492,50 @@ export default async (req) => {
           on conflict (client_id, month) do update set
             amount=excluded.amount, status=excluded.status, paid_date=excluded.paid_date`;
         return json({ ok: true });
+      }
+
+      case "paymentLinkCreate": {
+        // Create (or return) a Stripe Payment Link for one client + month.
+        // Optional feature: without the key the UI hides the buttons and this
+        // answers with a friendly 503 instead of a broken Stripe call.
+        if (!process.env.STRIPE_SECRET_KEY) {
+          return json({ error: "Stripe is not configured. Set STRIPE_SECRET_KEY." }, 503);
+        }
+        const { client_id, month } = payload;
+        if (!client_id || !month) return json({ error: "Missing client or month." }, 400);
+        const found = await sql`select name, fee from clients where id=${client_id} limit 1`;
+        if (!found.length) return json({ error: "Client not found." }, 404);
+        const fee = Number(found[0].fee) || 0;
+        if (fee <= 0) return json({ error: "Set the client's monthly fee first — the link charges that amount." }, 400);
+        // Make sure the payment row exists (same upsert as paymentSet), but
+        // never clobber an existing row's amount/status here.
+        await sql`insert into payments (client_id, month, amount, status)
+          values (${client_id}, ${month}, ${fee}, 'pending')
+          on conflict (client_id, month) do nothing`;
+        // Idempotent: one link per client+month — reuse it on repeat clicks.
+        const existing = await sql`select stripe_link_url from payments
+          where client_id=${client_id} and month=${month} limit 1`;
+        if (existing[0]?.stripe_link_url) return json({ url: existing[0].stripe_link_url });
+        // Price (with an inline product) first, then the link itself. The
+        // metadata on the LINK is copied onto each Checkout Session it opens —
+        // that's what the webhook reads to find this payments row.
+        const currency = (process.env.STRIPE_CURRENCY || "usd").toLowerCase();
+        const price = await stripePost("/v1/prices", {
+          unit_amount: String(Math.round(fee * 100)),
+          currency,
+          "product_data[name]": `${found[0].name} — SEO retainer ${month}`,
+        });
+        const link = await stripePost("/v1/payment_links", {
+          "line_items[0][price]": price.id,
+          "line_items[0][quantity]": "1",
+          "metadata[client_id]": String(client_id),
+          "metadata[month]": month,
+          "payment_intent_data[metadata][client_id]": String(client_id),
+          "payment_intent_data[metadata][month]": month,
+        });
+        await sql`update payments set stripe_link_url=${link.url}, stripe_link_id=${link.id}
+          where client_id=${client_id} and month=${month}`;
+        return json({ url: link.url });
       }
 
       case "resourceLinkAdd": {
