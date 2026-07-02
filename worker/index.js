@@ -1,5 +1,3 @@
-/* global process */
-
 // Cloudflare Worker entry: runs the SAME API handlers that power the Netlify
 // deployment (netlify/functions/*.js) on Cloudflare's free tier. The frontend
 // is a static build hosted anywhere (e.g. Hostinger) and calls this Worker
