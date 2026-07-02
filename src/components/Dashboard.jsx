@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles, Menu, X, Settings as SettingsIcon } from "lucide-react";
+import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles, Menu, X, Settings as SettingsIcon, TrendingUp } from "lucide-react";
 import * as api from "../lib/api";
 import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, iconBtn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
@@ -265,7 +265,7 @@ export default function Dashboard({ session, onSignOut }) {
     { k: "tasks", l: "Task Board", i: CheckSquare },
     { k: "deliverables", l: "Deliverables", i: ClipboardList },
     { k: "backlinks", l: "Backlinks", i: Link2 },
-    { k: "keywords", l: "Keywords", i: Search },
+    { k: "keywords", l: "Rank Tracker", i: TrendingUp },
     { k: "ai", l: "AI Visibility", i: Sparkles },
     { k: "revenue", l: "Revenue", i: DollarSign },
     { k: "activity", l: "Activity", i: History },
