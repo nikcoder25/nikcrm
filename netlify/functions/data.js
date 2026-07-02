@@ -27,6 +27,7 @@ const json = (obj, status = 200) =>
 let schemaReady = false;
 async function ensureSchema(sql) {
   if (schemaReady) return;
+  const _t = await sql`select to_regclass('public.clients') as n`; if (_t[0] && _t[0].n) { schemaReady = true; return; }
   await sql`create extension if not exists pgcrypto`;
   await sql`create table if not exists clients (
     id uuid primary key default gen_random_uuid(),
