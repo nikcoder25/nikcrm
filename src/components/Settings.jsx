@@ -92,7 +92,7 @@ export default function Settings({ isAdmin, name, onConnected }) {
             <div style={{ background: "#fdf3d8", border: "2px solid #b7791f", color: "#7a4f10", borderRadius: 10, padding: "12px 14px", fontSize: 12.5, fontWeight: 700, lineHeight: 1.5 }}>
               Google isn't configured on the server yet. An operator needs to create a Google Cloud OAuth client and set
               <code style={{ margin: "0 4px" }}>GOOGLE_CLIENT_ID</code> and <code style={{ margin: "0 4px" }}>GOOGLE_CLIENT_SECRET</code>
-              in Netlify (see the README). Then reload this page.
+              in Cloudflare (see the README). Then reload this page.
             </div>
           )}
 

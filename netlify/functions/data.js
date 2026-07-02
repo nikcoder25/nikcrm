@@ -543,7 +543,7 @@ function noteLoginFail(ip) {
   if (loginFails.size > 5000) loginFails.clear(); // bound memory
 }
 
-const NOT_CONFIGURED = "Login isn't set up yet. Set APP_PASSWORD in Netlify.";
+const NOT_CONFIGURED = "Login isn't set up yet. Set APP_PASSWORD in Cloudflare.";
 
 export default async (req) => {
   // GET is used only to download an uploaded file (streamed as its real bytes,

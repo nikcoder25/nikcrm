@@ -203,7 +203,7 @@ export default async (req) => {
   }
 
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (!sessionSecret()) return json({ error: "Login isn't set up yet. Set APP_PASSWORD in Netlify." }, 503);
+  if (!sessionSecret()) return json({ error: "Login isn't set up yet. Set APP_PASSWORD in Cloudflare." }, 503);
 
   const auth = authenticate(req);
   if (!auth) return json({ error: "Unauthorized" }, 401);
@@ -233,7 +233,7 @@ export default async (req) => {
 
       case "authUrl": {
         if (!isAdmin) return json({ error: "Only an admin can connect Google." }, 403);
-        if (!googleConfigured()) return json({ error: "Google isn't configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Netlify." }, 400);
+        if (!googleConfigured()) return json({ error: "Google isn't configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Cloudflare." }, 400);
         const state = crypto.randomUUID();
         await sql`insert into oauth_states (state, created_by) values (${state}, ${payload.by || ""})`;
         const params = new URLSearchParams({
