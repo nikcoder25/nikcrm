@@ -1,24 +1,64 @@
-import React from "react";
-import { Pencil, Trash2, ChevronRight, Download } from "lucide-react";
-import { ink, accent, tint, btn, iconBtn } from "../lib/theme";
-import { STATUS_LABEL } from "../lib/constants";
+import React, { useState, useMemo, useDeferredValue } from "react";
+import { Pencil, Trash2, ChevronRight, Download, Search } from "lucide-react";
+import { ink, accent, tint, btn, iconBtn, sel, input } from "../lib/theme";
+import { STATUSES, STATUS_LABEL } from "../lib/constants";
 import { downloadCsv, clientsCsv } from "../lib/csv";
 import { Panel, Empty } from "./ui";
 
 /* ---------------- Clients ---------------- */
 export default function Clients({ clients, deliverables = [], isAdmin, onOpen, onEdit, onDelete }) {
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  // Deferring the query keeps typing snappy even with hundreds of rows.
+  const q = useDeferredValue(query).trim().toLowerCase();
+
+  const filtered = useMemo(() => clients.filter((c) => {
+    if (statusFilter && c.status !== statusFilter) return false;
+    if (!q) return true;
+    return [c.name, c.niche, c.team_member, c.source, c.package]
+      .some((v) => (v || "").toLowerCase().includes(q));
+  }), [clients, q, statusFilter]);
+
+  // Group deliverables by client once instead of filtering the whole list per row.
+  const delsByClient = useMemo(() => {
+    const m = new Map();
+    for (const d of deliverables) {
+      if (!m.has(d.client_id)) m.set(d.client_id, { total: 0, delivered: 0 });
+      const g = m.get(d.client_id);
+      g.total += 1;
+      if (d.status === "delivered") g.delivered += 1;
+    }
+    return m;
+  }, [deliverables]);
+
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
-        <button style={btn("#fff", ink)} disabled={clients.length === 0} onClick={() => downloadCsv("clients.csv", clientsCsv(clients))}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
+          <Search size={15} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#a39db5" }} />
+          <input
+            style={{ ...input, paddingLeft: 36 }}
+            placeholder="Search name, niche, team member, source…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <select style={{ ...sel, flex: "none", minWidth: 130 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="">All statuses</option>
+          {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+        </select>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#6b6580", whiteSpace: "nowrap" }}>
+          {filtered.length} of {clients.length}
+        </span>
+        <button style={btn("#fff", ink)} disabled={filtered.length === 0} onClick={() => downloadCsv("clients.csv", clientsCsv(filtered))}>
           <Download size={15} /> Export CSV
         </button>
       </div>
-      {clients.length === 0 ? <Panel><Empty>No clients yet. Tap "Add client".</Empty></Panel> : (
+      {clients.length === 0 ? <Panel><Empty>No clients yet. Tap "Add client".</Empty></Panel> :
+       filtered.length === 0 ? <Panel><Empty>No clients match your search.</Empty></Panel> : (
     <Panel>
-      {clients.map((c) => {
-        const dels = deliverables.filter((d) => d.client_id === c.id);
-        const delivered = dels.filter((d) => d.status === "delivered").length;
+      {filtered.map((c) => {
+        const dels = delsByClient.get(c.id);
         return (
           <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "15px 20px", borderBottom: "2px solid #f0ece2" }}>
             {/* Clicking the client opens the full detail view */}
@@ -37,9 +77,9 @@ export default function Clients({ clients, deliverables = [], isAdmin, onOpen, o
                 </div>
               </div>
             </div>
-            {dels.length > 0 && (
+            {dels && dels.total > 0 && (
               <span title="Deliverables delivered / total" style={{ fontSize: 11, fontWeight: 800, background: "#fff", color: ink, padding: "4px 10px", borderRadius: 7, border: "2px solid " + ink }}>
-                {delivered}/{dels.length} delivered
+                {dels.delivered}/{dels.total} delivered
               </span>
             )}
             <span style={{ padding: "5px 12px", borderRadius: 7, fontSize: 11.5, fontWeight: 800, border: "2px solid " + ink, background: c.status === "active" ? accent : "#fff", color: c.status === "active" ? "#fff" : ink }}>{STATUS_LABEL[c.status] || c.status}</span>

@@ -111,3 +111,17 @@ create table if not exists client_reports (
   updated_at timestamptz default now(),
   unique (client_id, period)
 );
+
+-- ============================================================
+-- Indexes. Postgres does not auto-index FK columns; without these,
+-- per-client lookups and ON DELETE CASCADE degrade linearly with data size.
+-- (payments and client_reports are covered by their unique constraints,
+-- which lead with client_id.)
+-- ============================================================
+create index if not exists idx_tasks_client on tasks (client_id);
+create index if not exists idx_resources_client on resources (client_id);
+create index if not exists idx_resources_blob_key on resources (blob_key);
+create index if not exists idx_deliverables_client on deliverables (client_id);
+create index if not exists idx_keywords_client on keywords (client_id);
+create index if not exists idx_keyword_history_kw on keyword_history (keyword_id);
+create index if not exists idx_keyword_history_time on keyword_history (recorded_at);

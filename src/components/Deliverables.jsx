@@ -14,22 +14,29 @@ export default function Deliverables({ clients, deliverables, onCreate, onUpdate
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [preClient, setPreClient] = useState("");
+  const [filterClient, setFilterClient] = useState("");
 
   const openAdd = (client_id = "") => { setEditing(null); setPreClient(client_id); setShowForm(true); };
   const openEdit = (d) => { setEditing(d); setPreClient(""); setShowForm(true); };
   const close = () => { setShowForm(false); setEditing(null); setPreClient(""); };
 
   const withDeliverables = clients
+    .filter((c) => !filterClient || c.id === filterClient)
     .map((c) => ({ client: c, items: deliverables.filter((d) => d.client_id === c.id) }))
     .filter((g) => g.items.length > 0);
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 18 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 18 }}>
+        <select style={{ ...sel, flex: "none", minWidth: 170 }} value={filterClient} onChange={(e) => setFilterClient(e.target.value)}>
+          <option value="">All clients</option>
+          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <span style={{ flex: 1 }} />
         <button style={btn("#fff", ink)} disabled={deliverables.length === 0} onClick={() => downloadCsv("deliverables.csv", deliverablesCsv(deliverables, clients))}>
           <Download size={15} /> Export CSV
         </button>
-        <button style={btn(accent, "#fff")} disabled={clients.length === 0} onClick={() => openAdd()}>
+        <button style={btn(accent, "#fff")} disabled={clients.length === 0} onClick={() => openAdd(filterClient)}>
           <Plus size={16} /> Add deliverable
         </button>
       </div>

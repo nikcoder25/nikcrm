@@ -51,8 +51,10 @@ export default function Dashboard({ session, onSignOut }) {
     setError(e?.message || fallback);
   };
 
-  const load = async () => {
-    setLoading(true); setError("");
+  // Fetch fresh data WITHOUT toggling the loading flag, so refreshes after a
+  // mutation don't unmount the whole screen into a "Loading…" flash. The
+  // full-screen loader is reserved for the very first load.
+  const refresh = async () => {
     try {
       const { clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports } = await api.load();
       setClients(clients || []);
@@ -66,14 +68,20 @@ export default function Dashboard({ session, onSignOut }) {
     } catch (e) {
       handleErr(e, "Could not reach the database.");
     }
-    setLoading(false);
   };
+  const load = async () => { setLoading(true); setError(""); await refresh(); setLoading(false); };
   useEffect(() => { load(); }, []);
 
   // Wrap each mutation so a failure surfaces instead of silently doing nothing.
+  // The follow-up refresh happens in place (no loading flash). On failure we
+  // also refresh, so any optimistic local change rolls back to server truth.
   const run = async (fn) => {
-    try { await fn(); await load(); }
-    catch (e) { handleErr(e, "Something went wrong."); }
+    setError("");
+    try { await fn(); await refresh(); }
+    catch (e) {
+      handleErr(e, "Something went wrong.");
+      if (e?.status !== 401) await refresh();
+    }
   };
 
   const saveClient = (c) => run(async () => {
@@ -82,15 +90,32 @@ export default function Dashboard({ session, onSignOut }) {
   });
   const delClient = (id) => run(async () => { await api.deleteClient(id); backToClients(); });
   const addTask = (t) => run(() => api.addTask(t));
-  const moveTask = (id, status) => run(() => api.moveTask(id, status));
   const delTask = (id) => run(() => api.deleteTask(id));
-  const setPayment = (client_id, month, patch) => run(() => api.setPayment(client_id, month, patch));
   const createDeliverable = (d) => run(() => api.createDeliverable(d));
-  const updateDeliverable = (d) => run(() => api.updateDeliverable(d));
   const delDeliverable = (id) => run(() => api.deleteDeliverable(id));
   const createKeyword = (k) => run(() => api.createKeyword(k));
   const updateKeyword = (k) => run(() => api.updateKeyword(k));
   const delKeyword = (id) => run(() => api.deleteKeyword(id));
+
+  // High-frequency status changes are applied to local state IMMEDIATELY
+  // (optimistic), then synced to the server; the background refresh restores
+  // server truth. On failure, handleErr shows the error and refresh resyncs.
+  const moveTask = (id, status) => {
+    setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, status } : t)));
+    run(() => api.moveTask(id, status));
+  };
+  const updateDeliverable = (d) => {
+    setDeliverables((ds) => ds.map((x) => (x.id === d.id ? { ...x, ...d } : x)));
+    run(() => api.updateDeliverable(d));
+  };
+  const setPayment = (client_id, month, patch) => {
+    setPayments((ps) => {
+      const i = ps.findIndex((p) => p.client_id === client_id && p.month === month);
+      if (i >= 0) { const next = [...ps]; next[i] = { ...next[i], ...patch }; return next; }
+      return [...ps, { id: `tmp-${client_id}-${month}`, client_id, month, ...patch }];
+    });
+    run(() => api.setPayment(client_id, month, patch));
+  };
 
   const NAV = [
     { k: "overview", l: "Overview", i: LayoutDashboard },
