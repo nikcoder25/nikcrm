@@ -7,7 +7,7 @@ import { useRouter, clientIdFromPath, clientPath } from "../lib/router";
 import { useToast } from "../lib/toast";
 import { Center, Panel, Empty } from "./ui";
 import Overview from "./Overview";
-import Activity from "./Activity";
+import ActivityLog from "./ActivityLog";
 import Clients from "./Clients";
 import Board from "./Board";
 import Deliverables from "./Deliverables";
@@ -18,6 +18,7 @@ import Revenue from "./Revenue";
 import Team from "./Team";
 import ClientForm from "./ClientForm";
 import ClientDetail from "./ClientDetail";
+import CommandPalette from "./CommandPalette";
 
 /* ---------------- Dashboard ---------------- */
 export default function Dashboard({ session, onSignOut }) {
@@ -33,7 +34,8 @@ export default function Dashboard({ session, onSignOut }) {
   const [, setAiCitationHistory] = useState([]);
   const [reports, setReports] = useState([]);
   const [retainers, setRetainers] = useState([]);
-  const [activity, setActivity] = useState([]);
+  const [activity, setActivity] = useState([]);          // audit trail (who changed what)
+  const [activities, setActivities] = useState([]);      // client touchpoints (calls/emails/notes)
   const [members, setMembers] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
   const [tab, setTab] = useState("overview");
@@ -42,6 +44,7 @@ export default function Dashboard({ session, onSignOut }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false); // mobile drawer
+  const [paletteOpen, setPaletteOpen] = useState(false); // ⌘K quick-jump
 
   const toast = useToast();
 
@@ -83,6 +86,7 @@ export default function Dashboard({ session, onSignOut }) {
     client_retainers: setRetainers,
     team_members: setMembers,
     activity: setActivity,
+    activities: setActivities,
   };
 
   // Fetch fresh data WITHOUT toggling the loading flag, so refreshes after a
@@ -110,6 +114,18 @@ export default function Dashboard({ session, onSignOut }) {
   };
   const load = async () => { setLoading(true); setError(""); await refresh(); setLoading(false); };
   useEffect(() => { load(); }, []);
+
+  // Global ⌘K / Ctrl-K opens the quick-jump palette from anywhere.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Background sync so teammates' changes show up without any interaction.
   // Skipped while the tab is hidden to avoid pointless requests.
@@ -250,6 +266,11 @@ export default function Dashboard({ session, onSignOut }) {
           <div style={{ flex: 1 }}><div style={{ fontFamily: disp, fontSize: 17, color: "#fff" }}>Growth Atlas</div><div style={{ fontSize: 10.5, color: "#c9bdf0", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>SEO Ops</div></div>
           <button className="mobbar" onClick={() => setSidebarOpen(false)} aria-label="Close menu" style={{ background: "rgba(255,255,255,.12)", border: "none", borderRadius: 8, padding: 6, color: "#fff", cursor: "pointer" }}><X size={18} /></button>
         </div>
+        <button onClick={() => { setPaletteOpen(true); setSidebarOpen(false); }} aria-label="Search (Command or Control K)"
+          style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "10px 12px", marginBottom: 12, borderRadius: 10, border: BDt, background: "rgba(255,255,255,.1)", color: "#e9deff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+          <Search size={16} /> <span style={{ flex: 1, textAlign: "left" }}>Search…</span>
+          <kbd style={{ fontSize: 10, fontWeight: 800, border: "2px solid rgba(255,255,255,.3)", borderRadius: 5, padding: "1px 6px" }}>⌘K</kbd>
+        </button>
         <nav className="nav" aria-label="Main navigation" style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
           {NAV.map((n) => {
             const I = n.i, on = tab === n.k && !detailId;
@@ -275,7 +296,8 @@ export default function Dashboard({ session, onSignOut }) {
         {/* Mobile top bar (hidden on desktop via .mobbar) */}
         <div className="mobbar" style={{ alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: BD, background: "#fff", position: "sticky", top: 0, zIndex: 100 }}>
           <button onClick={() => setSidebarOpen(true)} aria-label="Open menu" style={{ ...iconBtn }}><Menu size={20} /></button>
-          <span style={{ fontFamily: disp, fontSize: 18 }}>Growth Atlas</span>
+          <span style={{ fontFamily: disp, fontSize: 18, flex: 1 }}>Growth Atlas</span>
+          <button onClick={() => setPaletteOpen(true)} aria-label="Search" style={{ ...iconBtn }}><Search size={20} /></button>
         </div>
 
         {errorBanner}
@@ -293,6 +315,10 @@ export default function Dashboard({ session, onSignOut }) {
                   aiCitations={aiCitations.filter((c) => c.client_id === detailClient.id)}
                   reports={reports.filter((r) => r.client_id === detailClient.id)}
                   retainers={retainers.filter((r) => r.client_id === detailClient.id)}
+                  activities={activities.filter((a) => a.client_id === detailClient.id)}
+                  payments={payments.filter((p) => p.client_id === detailClient.id)}
+                  tasks={tasks.filter((t) => t.client_id === detailClient.id)}
+                  author={session.name}
                   isAdmin={isAdmin}
                   onBack={backToClients}
                   onEdit={(c) => { setEditing(c); setShowForm(true); }}
@@ -316,15 +342,15 @@ export default function Dashboard({ session, onSignOut }) {
 
             <div style={{ padding: 28 }}>
               {loading ? <Center>Loading your board...</Center> :
-                tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} activity={activity} onNavigate={goTab} /> :
-                tab === "clients" ? <Clients clients={clients} deliverables={deliverables} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} onAdd={openAddClient} /> :
+                tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} activities={activities} activity={activity} onNavigate={goTab} onOpenClient={openClient} /> :
+                tab === "clients" ? <Clients clients={clients} deliverables={deliverables} payments={payments} tasks={tasks} keywords={keywords} activities={activities} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} onAdd={openAddClient} /> :
                 tab === "tasks" ? <Board clients={clients} tasks={tasks} members={members} onAdd={saveTask} onMove={moveTask} onAssign={assignTask} onDelete={delTask} /> :
                 tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onSave={saveDeliverable} onStatus={statusDeliverable} onDelete={delDeliverable} onGenerate={generateDeliverables} /> :
                 tab === "backlinks" ? <Backlinks clients={clients} backlinks={backlinks} onCreate={createBacklink} onUpdate={updateBacklink} onDelete={delBacklink} /> :
                 tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
                 tab === "ai" ? <AiVisibility clients={clients} citations={aiCitations} onCreate={createAiCitation} onUpdate={updateAiCitation} onDelete={delAiCitation} /> :
                 tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
-                tab === "activity" ? <Activity items={activity} clients={clients} /> :
+                tab === "activity" ? <ActivityLog items={activity} clients={clients} /> :
                 <Team members={members} clients={clients} tasks={tasks} onSave={saveMember} onDelete={delMember} isAdmin={isAdmin} />}
             </div>
           </>
@@ -332,6 +358,15 @@ export default function Dashboard({ session, onSignOut }) {
       </main>
 
       {showForm && <ClientForm initial={editing} members={members} onClose={() => { setShowForm(false); setEditing(null); }} onSave={saveClient} />}
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        clients={clients}
+        nav={NAV}
+        onOpenClient={openClient}
+        onGoTab={goTab}
+      />
     </div>
   );
 }

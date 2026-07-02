@@ -45,3 +45,13 @@ export const AI_ENGINES = [
   { key: "other", label: "Other" },
 ];
 export const aiEngineLabel = (k) => (AI_ENGINES.find((e) => e.key === k) || AI_ENGINES[5]).label;
+
+// Activity log: the kinds of client touchpoint that can be recorded. `icon`
+// names a lucide-react icon resolved by the Activity component.
+export const ACTIVITY_TYPES = [
+  { key: "note", label: "Note", icon: "StickyNote" },
+  { key: "call", label: "Call", icon: "Phone" },
+  { key: "email", label: "Email", icon: "Mail" },
+  { key: "meeting", label: "Meeting", icon: "Users" },
+];
+export const activityLabel = (k) => (ACTIVITY_TYPES.find((t) => t.key === k) || ACTIVITY_TYPES[0]).label;

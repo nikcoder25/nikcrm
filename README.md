@@ -8,7 +8,12 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 ---
 
 ## What you get
-- **Overview**: a home dashboard with rollup KPIs (clients, open tasks, deliverables delivered/overdue, MRR + collected, avg keyword rank), a **"Needs attention"** list of everything overdue or over scope, and a "Recent activity" panel. Optionally a scheduled function (`netlify/functions/overdue-digest.mjs`, 07:00 UTC daily) emails the overdue list to the team — set `RESEND_API_KEY` + `DIGEST_EMAIL`
+- **Overview**: a home dashboard with rollup KPIs (clients, open tasks, deliverables delivered/overdue, MRR + collected, avg keyword rank), a **client-status breakdown** bar, a **"Needs attention"** list of everything overdue or over scope (including due follow-ups), a **"Recent activity"** feed of the latest client touchpoints, and a "Recent changes" audit panel. Optionally a scheduled function (`netlify/functions/overdue-digest.mjs`, 07:00 UTC daily) emails the overdue list to the team — set `RESEND_API_KEY` + `DIGEST_EMAIL`
+- **Quick-jump search** (**⌘K / Ctrl-K** from anywhere, or the sidebar Search button): fuzzy-search every client and jump straight to their page, or hop to any section — keyboard-first (↑/↓/Enter/Esc)
+- **Activity timeline**: inside each client's detail view, log every touchpoint — **note, call, email, or meeting** — with the author and a timestamp you can backdate. The newest interactions surface on the Overview's "Recent activity" feed, turning the board into a real relationship record
+- **Follow-up reminders**: attach a **next-follow-up date** to any logged activity. Overdue and due-today follow-ups show up on the Overview's "Needs attention" list (click straight through to the client) and as a badge on the timeline entry; mark one done with a click
+- **Client health score**: every client gets a computed **0–100 health score** (Healthy / Watch / At risk) from money owed, overdue & blocked work, keyword momentum, overdue follow-ups, and how recently they were engaged. Shown as a badge on the client list, the detail page, and filterable by health
+- **Add to calendar (.ics)**: export a client's follow-ups and meetings as a standard **calendar file** that imports into Google / Apple / Outlook Calendar — one-way, no account connection needed
 - **Clients**: add, edit, delete — status, source, package, team, dates, notes, monthly fee. Click any client for a linkable **detail view** (`/clients/:id`) with everything in one place, plus a **Resources** panel — attach links (Google Drive, Canva, Sheets…) *and* upload job files (stored in Netlify Blobs, up to 4 MB each)
 - **Task Board** (kanban): Guest Post, On-Page, Backlink, Anchor Text, Blog, Audit, Schema. Assign people, filter by client/assignee, **drag cards** between To Do → In Progress → Done (the ‹ › buttons remain for mobile/keyboard)
 - **Deliverables**: track what you owe each client — type, quantity, due date, and status (Planned / In Progress / Delivered / Blocked), grouped by client with a per-client delivered/total summary. **Monthly generation** creates the month's missing deliverables from each client's retainer scope in one click ("Generate this month", also available per client) — idempotent, so re-running only tops up the shortfall, never duplicates
@@ -20,7 +25,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Monthly Report**: inside each client's detail view, generate a printable monthly snapshot — keyword rankings (current/previous/movement, top-10, avg, net improvement), an **Organic search** section when Search Console is linked (month totals vs previous month + top 10 queries), link building, AI visibility, deliverables with a delivered/total rollup, scope-delivered, and a saved free-text "wins" narrative. **Print / Export** opens a clean print-friendly layout (Save as PDF). A scheduled function (`netlify/functions/monthly-report-email.mjs`, 08:00 UTC on the 1st) **emails each opted-in client their report** for the month that just ended — set `RESEND_API_KEY` and a recipient per client in the detail view
 - **Google Search Console integration** *(optional)*: link each client to their Search Console property (`sc-domain:example.com` or `https://example.com/`) and a scheduled function (`netlify/functions/gsc-sync.mjs`, 05:30 UTC) pulls their organic performance nightly via one agency-wide **Google service account** (`GSC_SERVICE_ACCOUNT_JSON` env var). The client detail view gets an **"Organic search"** panel — clicks + impressions for the last 28 days with change vs the previous 28, a daily-clicks chart, and a top-queries table — and feeds the Monthly Report's Organic search section. Without the env var everything stays hidden and manual
 - **Client portal**: give each client a private, read-only share link (`/portal/<token>`, no login) showing their keyword rankings with movement and rank-over-time charts, the month's deliverables, retainer scope progress and the saved monthly narrative — and nothing internal (no fees, notes or team data). Create, copy, disable/enable or regenerate the link from the client's detail view; regenerating or disabling revokes the old link instantly. Set the optional `AGENCY_NAME` env var to white-label the portal branding (defaults to "Growth Atlas"). The same panel also sets the **monthly report email** recipient used by the scheduled report emailer
-- **Activity** log: a team-wide audit trail — who created/edited/deleted clients, tasks, keywords, deliverables, payments and more, with relative timestamps. Full feed in its own tab, plus a "Recent activity" panel on the Overview
+- **Activity** log: a team-wide audit trail — who created/edited/deleted clients, tasks, keywords, deliverables, payments and more, with relative timestamps. Full feed in its own tab, plus a "Recent changes" panel on the Overview (distinct from the client touchpoint timeline above)
 - **Team**: a workload view (who has how many clients and tasks) plus login management. Everyone logs in with one shared password (set an optional second password for admins), and admins can add optional **per-user accounts** (email + personal password) from the Team tab — see [Per-user accounts](#per-user-accounts). **Roles**: admins can delete clients and manage user accounts; everyone else can do everything else
 - **CSV exports**: Clients, Deliverables, Keywords, Backlinks, AI visibility and Payments each have an "Export CSV" button — opens straight in Excel / Google Sheets, built entirely in the browser from already-loaded data
 - **Background sync**: data refreshes every 60 seconds in the background (paused while the tab is hidden) and high-frequency changes (task moves, status flips, stars) apply optimistically — teammates' changes show up on their own and the screen never blanks mid-work
@@ -155,9 +160,11 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
     ├── App.jsx             Top-level: login vs. dashboard vs. portal route
     ├── lib/                Non-UI modules
     │   ├── api.js          Talks to /api/data + stores the session
-    │   ├── constants.js    Statuses, sources, task types, pay states, AI engines
-    │   ├── format.js       money / month helpers (+ format.test.js)
+    │   ├── constants.js    Statuses, sources, task types, pay states, AI engines, activity types
+    │   ├── format.js       money / month / date-time helpers (+ format.test.js)
     │   ├── csv.js          CSV export builders + download
+    │   ├── ics.js          iCalendar (.ics) export for follow-ups & meetings
+    │   ├── health.js       Client health score (0–100) computation
     │   ├── router.js       Tiny history-based router (+ router.test.js)
     │   ├── scope.js        Retainer scope vs delivered logic (+ scope.test.js)
     │   └── theme.js        Colors, borders, shared style tokens, global CSS
@@ -165,7 +172,7 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
         ├── Login.jsx           Team password or personal account login
         ├── Dashboard.jsx       Shell, nav, data loading, tab routing
         ├── Overview.jsx        Home dashboard: KPI rollups + overdue list
-        ├── Activity.jsx        Activity feed (audit trail)
+        ├── ActivityLog.jsx     Activity feed (audit trail: who changed what)
         ├── Clients.jsx         Clients list
         ├── Board.jsx           Kanban task board (drag-and-drop)
         ├── Deliverables.jsx    Per-client deliverables + add/edit form + monthly generation
@@ -175,6 +182,8 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
         ├── Revenue.jsx         MRR, collected/pending, payment tracker + Stripe links
         ├── Team.jsx            Per-member workload + user account management
         ├── ClientForm.jsx      Add / edit client modal
+        ├── CommandPalette.jsx  ⌘K quick-jump search (clients + pages)
+        ├── Activity.jsx        Per-client interaction timeline (note/call/email/meeting)
         ├── ClientDetail.jsx    Client detail view: resources, portal link, report email, GSC panel
         ├── Portal.jsx          Public read-only client portal (/portal/:token)
         ├── ClientReport.jsx    Printable per-client monthly report + narrative

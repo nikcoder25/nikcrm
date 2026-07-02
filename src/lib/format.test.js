@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { money, ym, ymLabel, todayStr, isPastDue, timeAgo, lastDayOfMonth } from "./format.js";
+import { money, ym, ymLabel, todayStr, isPastDue, timeAgo, lastDayOfMonth, dateLabel, dateTimeLabel, localDateTimeInput } from "./format.js";
 
 describe("money", () => {
   it("formats numbers with a dollar sign", () => {
@@ -57,5 +57,34 @@ describe("timeAgo", () => {
   it("returns empty for junk and never goes negative", () => {
     expect(timeAgo("not a date", now)).toBe("");
     expect(timeAgo(ago(-60 * 1000), now)).toBe("just now"); // slight clock skew
+  });
+});
+
+describe("dateLabel", () => {
+  it("formats a plain calendar date without timezone shift", () => {
+    expect(dateLabel("2026-07-02")).toBe("Jul 2, 2026");
+    expect(dateLabel("2026-01-31T00:00:00Z")).toBe("Jan 31, 2026"); // only the date part counts
+  });
+  it("returns empty for junk", () => {
+    expect(dateLabel("")).toBe("");
+    expect(dateLabel(null)).toBe("");
+    expect(dateLabel("not-a-date")).toBe("");
+  });
+});
+
+describe("dateTimeLabel", () => {
+  it("formats a timestamp as a short date-time", () => {
+    // The space before AM/PM varies by ICU version (U+0020 vs U+202F), so match loosely.
+    expect(dateTimeLabel(new Date(2026, 6, 2, 15, 14))).toMatch(/Jul 2, 2026, 3:14\sPM/);
+  });
+  it("returns empty for junk", () => {
+    expect(dateTimeLabel("")).toBe("");
+    expect(dateTimeLabel("nope")).toBe("");
+  });
+});
+
+describe("localDateTimeInput", () => {
+  it("renders a datetime-local value in local time", () => {
+    expect(localDateTimeInput(new Date(2026, 6, 2, 9, 5))).toBe("2026-07-02T09:05");
   });
 });

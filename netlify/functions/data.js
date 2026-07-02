@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { neon } from "@netlify/neon";
 import { newPasswordRecord, verifyPassword, signToken, verifyToken } from "../lib/auth.js";
 import { getStore } from "@netlify/blobs";
-import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, BACKLINK_STATES, AI_ENGINES, typeLabel } from "../../src/lib/constants.js";
+import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, BACKLINK_STATES, AI_ENGINES, ACTIVITY_TYPES, typeLabel, activityLabel } from "../../src/lib/constants.js";
 import { lastDayOfMonth } from "../../src/lib/format.js";
 
 // Uploaded client files live in a Netlify Blobs store (auto-available to
@@ -242,6 +242,24 @@ async function ensureSchema(sql) {
     active boolean default true,
     created_at timestamptz default now()
   )`;
+  // Activity log: a lightweight interaction timeline per client (the CRM
+  // "touchpoints" — calls, emails, meetings, and free-text notes). happened_at
+  // is when the interaction occurred (author-editable); created_at is the row
+  // insert time. This is what turns the ops board into a real CRM. Distinct
+  // from the `activity` audit table below, which records who changed what.
+  await sql`create table if not exists activities (
+    id uuid primary key default gen_random_uuid(),
+    client_id uuid references clients(id) on delete cascade,
+    type text default 'note',                -- note / call / email / meeting
+    body text default '',
+    author text default '',
+    happened_at timestamptz default now(),
+    follow_up_date date,                      -- optional "next touch" reminder; null once done
+    created_at timestamptz default now()
+  )`;
+  // follow_up_date was added after the first activities release; add it for
+  // installs whose table predates it.
+  await sql`alter table activities add column if not exists follow_up_date date`;
   // Audit trail. client_id has NO foreign key on purpose: activity must
   // survive client deletion, so the human-readable name lives in
   // entity_label/detail instead of being joined at read time.
@@ -273,6 +291,8 @@ async function ensureSchema(sql) {
     sql`create index if not exists idx_ai_citations_client on ai_citations (client_id)`,
     sql`create index if not exists idx_ai_citation_history_cit on ai_citation_history (citation_id)`,
     sql`create index if not exists idx_activity_time on activity (created_at desc)`,
+    sql`create index if not exists idx_activities_client on activities (client_id)`,
+    sql`create index if not exists idx_activities_time on activities (happened_at)`,
   ]);
   schemaReady = true;
 }
@@ -304,6 +324,10 @@ const DATASET_QUERIES = {
   team_members: (sql) => sql`select id, name, role, email from team_members order by name asc`,
   activity: (sql) => sql`select id, actor, verb, entity, entity_label, client_id, detail, created_at
     from activity order by created_at desc limit 100`,
+  // Client touchpoint timeline (notes / calls / emails / meetings) — distinct
+  // from the `activity` audit trail above.
+  activities: (sql) => sql`select id, client_id, type, body, author, happened_at, follow_up_date
+    from activities order by happened_at desc`,
 };
 
 // Fetch the named datasets in parallel → { name: rows, ... }.
@@ -349,6 +373,7 @@ const PAY_STATE_KEYS = PAY_STATES.map((s) => s.key);
 const DELIVERABLE_STATE_KEYS = DELIVERABLE_STATES.map((s) => s.key);
 const BACKLINK_STATE_KEYS = BACKLINK_STATES.map((s) => s.key);
 const AI_ENGINE_KEYS = AI_ENGINES.map((e) => e.key);
+const ACTIVITY_TYPE_KEYS = ACTIVITY_TYPES.map((t) => t.key);
 const KEYWORD_PLATFORMS = ["desktop", "mobile"];
 const USER_ROLES = ["member", "admin"];
 // Loose email shape check — one @, something either side, a dot in the domain.
@@ -1277,6 +1302,46 @@ export default async (req) => {
         // roster does NOT unassign anyone: clients/tasks keep the stored name.
         const mGone = await sql`delete from team_members where id=${payload.id} returning name`;
         if (mGone.length) await logActivity(sql, { actor, verb: "removed team member", entity: "team_member", entity_label: mGone[0].name });
+        return json({ ok: true });
+      }
+
+      /* -------- activity log (client interaction timeline) -------- */
+      // The `activities` touchpoint timeline — NOT the `activity` audit trail,
+      // which is written by logActivity and is never mutated directly.
+
+      case "activityAdd": {
+        // Log a client touchpoint (note / call / email / meeting). happened_at
+        // defaults to now, but the UI may pass an explicit date/time.
+        const a = payload;
+        if (!a.client_id) return json({ error: "Missing client." }, 400);
+        if (!a.body || !a.body.trim()) return json({ error: "Write something to log." }, 400);
+        const bad = badEnum("type", a.type, ACTIVITY_TYPE_KEYS);
+        if (bad) return bad;
+        const type = a.type || "note";
+        const happenedAt = a.happened_at ? new Date(a.happened_at) : new Date();
+        if (Number.isNaN(happenedAt.getTime())) return json({ error: "Invalid date/time." }, 400);
+        const followUp = a.follow_up_date ? String(a.follow_up_date).slice(0, 10) : null;
+        await sql`insert into activities (client_id, type, body, author, happened_at, follow_up_date)
+          values (${a.client_id}, ${type}, ${a.body.trim()}, ${a.author || actor || ""}, ${happenedAt.toISOString()}, ${followUp})`;
+        await logActivity(sql, { actor, verb: "logged", entity: "activity", entity_label: `a ${activityLabel(type).toLowerCase()}`, client_id: a.client_id });
+        return json({ ok: true });
+      }
+
+      case "activityFollowupSet": {
+        // Set or clear (null) the follow-up reminder on an existing activity.
+        const a = payload;
+        if (!a.id) return json({ error: "Missing activity id." }, 400);
+        const followUp = a.follow_up_date ? String(a.follow_up_date).slice(0, 10) : null;
+        const rows = await sql`update activities set follow_up_date=${followUp}
+          where id=${a.id} returning type, client_id`;
+        if (rows.length) await logActivity(sql, { actor, verb: followUp ? "set a follow-up on" : "completed a follow-up on", entity: "activity", entity_label: `a ${activityLabel(rows[0].type).toLowerCase()}`, client_id: rows[0].client_id });
+        return json({ ok: true });
+      }
+
+      case "activityDelete": {
+        // Not admin-gated — only client deletion is.
+        const gone = await sql`delete from activities where id=${payload.id} returning type, client_id`;
+        if (gone.length) await logActivity(sql, { actor, verb: "removed", entity: "activity", entity_label: `a logged ${activityLabel(gone[0].type).toLowerCase()}`, client_id: gone[0].client_id });
         return json({ ok: true });
       }
 

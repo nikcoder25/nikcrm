@@ -253,6 +253,20 @@ create table if not exists team_members (
   created_at timestamptz default now()
 );
 
+-- Activity log: a lightweight interaction timeline per client (calls, emails,
+-- meetings, notes). happened_at is when the interaction occurred; created_at is
+-- the row insert time. This is the CRM "touchpoint" history.
+create table if not exists activities (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  type text default 'note',                -- note / call / email / meeting
+  body text default '',
+  author text default '',
+  happened_at timestamptz default now(),
+  follow_up_date date,                      -- optional "next touch" reminder; null once done
+  created_at timestamptz default now()
+);
+
 -- ============================================================
 -- Indexes. Postgres does not auto-index FK columns; without these,
 -- per-client lookups and ON DELETE CASCADE degrade linearly with data size.
@@ -270,3 +284,5 @@ create index if not exists idx_backlinks_client on backlinks (client_id);
 create index if not exists idx_ai_citations_client on ai_citations (client_id);
 create index if not exists idx_ai_citation_history_cit on ai_citation_history (citation_id);
 create index if not exists idx_activity_time on activity (created_at desc);
+create index if not exists idx_activities_client on activities (client_id);
+create index if not exists idx_activities_time on activities (happened_at);

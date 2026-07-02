@@ -198,3 +198,8 @@ export const deleteUser = (id) => call("userDelete", { id });
 /* ---------------- monthly report email recipient ---------------- */
 export const getReportEmail = (client_id) => call("reportEmailGet", { client_id });
 export const setReportEmail = (client_id, recipient, enabled) => call("reportEmailSet", { client_id, recipient, enabled });
+
+/* ---------------- activity log (client interaction timeline) ---------------- */
+export const addActivity = (a) => call("activityAdd", a);
+export const deleteActivity = (id) => call("activityDelete", { id });
+export const setActivityFollowup = (id, follow_up_date) => call("activityFollowupSet", { id, follow_up_date });

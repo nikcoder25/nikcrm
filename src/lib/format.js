@@ -27,3 +27,25 @@ export const timeAgo = (ts, now = new Date()) => {
   if (s < 172800) return "yesterday";
   return d.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" });
 };
+
+// A plain calendar date 'YYYY-MM-DD' → "Jul 2, 2026" (parsed as local, no TZ shift).
+export const dateLabel = (s) => {
+  if (!s) return "";
+  const [y, m, d] = String(s).slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return new Date(y, m - 1, d).toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" });
+};
+
+// A short, human date-time for the activity timeline: e.g. "Jul 2, 2026, 3:14 PM".
+export const dateTimeLabel = (s) => {
+  if (!s) return "";
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("en", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+};
+
+// 'YYYY-MM-DDTHH:mm' in local time, for a datetime-local input default value.
+export const localDateTimeInput = (d = new Date()) => {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
