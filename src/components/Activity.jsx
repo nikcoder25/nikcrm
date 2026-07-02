@@ -1,0 +1,138 @@
+import React, { useState } from "react";
+import { StickyNote, Phone, Mail, Users, Trash2, Send, Clock } from "lucide-react";
+import { ink, accent, tint, disp, BD, BDt, btn, input, iconBtn } from "../lib/theme";
+import { ACTIVITY_TYPES, activityLabel } from "../lib/constants";
+import { dateTimeLabel, localDateTimeInput } from "../lib/format";
+import { addActivity, deleteActivity } from "../lib/api";
+import { useToast } from "../lib/toast";
+import { Empty } from "./ui";
+
+// Resolve an activity type's lucide icon from its constant `icon` name.
+const ICONS = { StickyNote, Phone, Mail, Users };
+export const activityIcon = (type) => {
+  const t = ACTIVITY_TYPES.find((x) => x.key === type);
+  return ICONS[t?.icon] || StickyNote;
+};
+
+// Per-client interaction timeline: log notes / calls / emails / meetings and
+// see them in reverse-chronological order. `activities` arrives already
+// filtered + sorted (happened_at desc) by the parent.
+export default function Activity({ client, activities = [], author = "", onChanged }) {
+  const [type, setType] = useState("note");
+  const [body, setBody] = useState("");
+  const [when, setWhen] = useState("");        // datetime-local; blank = now
+  const [showWhen, setShowWhen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const toast = useToast();
+
+  const log = () => {
+    if (!body.trim()) { setErr("Write something to log."); return; }
+    setErr(""); setBusy(true);
+    (async () => {
+      try {
+        await addActivity({
+          client_id: client.id,
+          type,
+          body: body.trim(),
+          author,
+          happened_at: when ? new Date(when).toISOString() : undefined,
+        });
+        setBody(""); setWhen(""); setShowWhen(false); setType("note");
+        await onChanged();
+        toast("Activity logged");
+      } catch (e) {
+        setErr(e?.message || "Something went wrong.");
+        toast(e?.message || "Something went wrong.", "error");
+      }
+      setBusy(false);
+    })();
+  };
+
+  const remove = (id) => {
+    setBusy(true);
+    (async () => {
+      try { await deleteActivity(id); await onChanged(); toast("Activity removed"); }
+      catch (e) { toast(e?.message || "Something went wrong.", "error"); }
+      setBusy(false);
+    })();
+  };
+
+  return (
+    <div style={{ marginTop: 22 }} className="no-print">
+      <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
+        <Clock size={16} /> Activity
+        {activities.length > 0 && (
+          <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>{activities.length}</span>
+        )}
+      </h2>
+
+      {err && <div style={{ background: tint, border: BDt, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
+
+      {/* compose */}
+      <div style={{ border: BDt, borderRadius: 12, padding: 12, marginBottom: 16, background: "#faf8f2" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          {ACTIVITY_TYPES.map((t) => {
+            const I = ICONS[t.icon] || StickyNote, on = type === t.key;
+            return (
+              <button key={t.key} type="button" onClick={() => setType(t.key)}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 8, border: BDt, background: on ? accent : "#fff", color: on ? "#fff" : ink, fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}>
+                <I size={14} /> {t.label}
+              </button>
+            );
+          })}
+        </div>
+        <textarea
+          style={{ ...input, minHeight: 64, resize: "vertical" }}
+          placeholder={`Log a ${activityLabel(type).toLowerCase()}… what happened, what's next?`}
+          aria-label="Activity note"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") log(); }}
+        />
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+          {showWhen ? (
+            <input type="datetime-local" style={{ ...input, flex: "0 0 auto", width: "auto" }} aria-label="When did this happen"
+              value={when || localDateTimeInput()} onChange={(e) => setWhen(e.target.value)} />
+          ) : (
+            <button type="button" onClick={() => { setShowWhen(true); setWhen(localDateTimeInput()); }}
+              style={{ ...iconBtn, gap: 6, alignItems: "center", fontSize: 12, fontWeight: 800, padding: "8px 11px" }}>
+              <Clock size={14} /> Backdate
+            </button>
+          )}
+          <button style={{ ...btn(accent, "#fff"), marginLeft: "auto" }} disabled={busy} onClick={log}>
+            <Send size={15} /> {busy ? "Saving…" : "Log activity"}
+          </button>
+        </div>
+      </div>
+
+      {/* timeline */}
+      {activities.length === 0 ? (
+        <Empty>No activity logged yet. Record your first call, email, or note above.</Empty>
+      ) : (
+        <div style={{ position: "relative", paddingLeft: 6 }}>
+          {activities.map((a) => {
+            const I = activityIcon(a.type);
+            return (
+              <div key={a.id} style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "12px 0", borderBottom: "1px solid #f0ece2" }}>
+                <div style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 9, background: tint, border: BDt, display: "flex", alignItems: "center", justifyContent: "center", color: accent }}>
+                  <I size={16} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", color: accent }}>{activityLabel(a.type)}</span>
+                    <span style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 600 }}>
+                      {a.author ? `${a.author} · ` : ""}{dateTimeLabel(a.happened_at)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: "#332f45", whiteSpace: "pre-wrap", wordBreak: "break-word", marginTop: 3 }}>{a.body}</div>
+                </div>
+                <button style={iconBtn} title="Remove" aria-label="Remove activity" disabled={busy} onClick={() => remove(a.id)}><Trash2 size={14} /></button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

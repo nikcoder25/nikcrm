@@ -23,3 +23,13 @@ export const DELIVERABLE_STATES = [
   { key: "blocked", label: "Blocked" },
 ];
 export const deliverableStatusLabel = (k) => (DELIVERABLE_STATES.find((s) => s.key === k) || DELIVERABLE_STATES[0]).label;
+
+// Activity log: the kinds of client touchpoint that can be recorded. `icon`
+// names a lucide-react icon resolved by the Activity component.
+export const ACTIVITY_TYPES = [
+  { key: "note", label: "Note", icon: "StickyNote" },
+  { key: "call", label: "Call", icon: "Phone" },
+  { key: "email", label: "Email", icon: "Mail" },
+  { key: "meeting", label: "Meeting", icon: "Users" },
+];
+export const activityLabel = (k) => (ACTIVITY_TYPES.find((t) => t.key === k) || ACTIVITY_TYPES[0]).label;

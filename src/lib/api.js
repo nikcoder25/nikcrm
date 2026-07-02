@@ -115,3 +115,7 @@ export const deleteRetainer = (id) => call("retainerDelete", { id });
 export const createMember = (m) => call("teamAdd", m);
 export const updateMember = (m) => call("teamUpdate", m);
 export const deleteMember = (id) => call("teamDelete", { id });
+
+/* ---------------- activity log (client interaction timeline) ---------------- */
+export const addActivity = (a) => call("activityAdd", a);
+export const deleteActivity = (id) => call("activityDelete", { id });

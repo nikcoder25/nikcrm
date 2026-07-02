@@ -12,6 +12,7 @@ import { Empty } from "./ui";
 import { KeywordRows, KeywordForm, keywordSummary } from "./Keywords";
 import ClientScope from "./ClientScope";
 import ClientReport from "./ClientReport";
+import Activity from "./Activity";
 
 const fmtSize = (n) => {
   const b = Number(n) || 0;
@@ -36,7 +37,7 @@ function Detail({ label, value }) {
   );
 }
 
-export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], retainers = [], isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
+export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], reports = [], retainers = [], activities = [], author = "", isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -125,7 +126,9 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
           </div>
         </div>
 
-        <div style={{ marginTop: 20 }}>
+        <Activity client={client} activities={activities} author={author} onChanged={onChanged} />
+
+        <div style={{ marginTop: 22, borderTop: "2px solid #f0ece2", paddingTop: 20 }}>
           <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
             <Paperclip size={16} /> Resources & files
           </h2>

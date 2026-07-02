@@ -8,7 +8,9 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 ---
 
 ## What you get
-- **Overview**: a home dashboard with rollup KPIs (clients, open tasks, deliverables delivered/overdue, MRR + collected, avg keyword rank) and a **"Needs attention"** list of everything overdue
+- **Overview**: a home dashboard with rollup KPIs (clients, open tasks, deliverables delivered/overdue, MRR + collected, avg keyword rank), a **client-status breakdown** bar, a **"Needs attention"** list of everything overdue, and a **"Recent activity"** feed of the latest client touchpoints
+- **Quick-jump search** (**⌘K / Ctrl-K** from anywhere, or the sidebar Search button): fuzzy-search every client and jump straight to their page, or hop to any section — keyboard-first (↑/↓/Enter/Esc)
+- **Activity timeline**: inside each client's detail view, log every touchpoint — **note, call, email, or meeting** — with the author and a timestamp you can backdate. The newest interactions surface on the Overview's "Recent activity" feed, turning the board into a real relationship record
 - **Team login** with one shared password (set an optional second password for admins)
 - **Roles**: admins can delete clients; everyone else can do everything else
 - **Clients**: add, edit, delete — status, source, package, team, dates, notes, monthly fee
@@ -102,6 +104,8 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
         ├── Revenue.jsx         MRR, collected/pending, payment tracker
         ├── Team.jsx            Per-member workload
         ├── ClientForm.jsx      Add / edit client modal
+        ├── CommandPalette.jsx  ⌘K quick-jump search (clients + pages)
+        ├── Activity.jsx        Per-client interaction timeline (note/call/email/meeting)
         ├── ClientDetail.jsx    Client detail view + resources (links & files)
         ├── ClientReport.jsx    Printable per-client monthly report + narrative
         ├── ClientScope.jsx     Retainer scope: included vs delivered per month
