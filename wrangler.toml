@@ -21,7 +21,7 @@ compatibility_flags = ["nodejs_compat"]
 # The origin(s) the frontend is served from — REQUIRED for the browser to be
 # allowed to call this API. Comma-separate several. Example:
 # ALLOWED_ORIGIN = "https://yourdomain.com,https://www.yourdomain.com"
-ALLOWED_ORIGIN = ""
+ALLOWED_ORIGIN = "https://blueviolet-owl-311449.hostingersite.com"
 # White-label name for client portal pages (optional).
 # AGENCY_NAME = "Your Agency"
 
