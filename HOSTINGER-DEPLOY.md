@@ -100,6 +100,22 @@ VITE_API_BASE=https://growth-atlas-api.<your-subdomain>.workers.dev npm run buil
 
 ## Updating the app later
 
+**Automatic (recommended):** `.github/workflows/deploy.yml` deploys both halves
+on every push to `main` once these are set in
+GitHub → repo → **Settings → Secrets and variables → Actions**:
+
+- Secrets: `CLOUDFLARE_API_TOKEN` (Cloudflare → My Profile → API Tokens →
+  create with the **"Edit Cloudflare Workers"** template), plus `FTP_HOST`,
+  `FTP_USERNAME`, `FTP_PASSWORD` (Hostinger hPanel → **Files → FTP Accounts**).
+- Variables: `VITE_API_BASE` = your Worker URL. Optional `FTP_SERVER_DIR`
+  (defaults to `public_html/`).
+
+Runtime secrets (DB URL, passwords, integration keys) can be managed without a
+terminal in the Cloudflare dashboard: **Workers & Pages → growth-atlas-api →
+Settings → Variables and Secrets**.
+
+**Manual:**
+
 ```bash
 npx wrangler deploy                                   # API changes
 VITE_API_BASE=https://<worker-url> npm run build      # frontend changes →
