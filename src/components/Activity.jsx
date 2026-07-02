@@ -96,7 +96,7 @@ export default function Activity({ client, activities = [], author = "", googleC
   const canCalendar = (a) => Boolean(a.follow_up_date) || (a.type === "meeting" && a.happened_at);
 
   return (
-    <div style={{ marginTop: 22 }} className="no-print">
+    <div className="no-print">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>
           <Clock size={16} /> Activity

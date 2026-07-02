@@ -1,9 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Pencil, Trash2, Paperclip, Link2, FileText, Upload, ExternalLink, Search, Plus, Share2, Copy, RefreshCw, Mail, BarChart3 } from "lucide-react";
+import {
+  ArrowLeft, Pencil, Trash2, Paperclip, Link2, FileText, Upload, ExternalLink, Search, Plus,
+  Share2, Copy, RefreshCw, Mail, BarChart3, LayoutDashboard, Clock, ClipboardList, CalendarClock,
+} from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, SH, SHs, btn, iconBtn, input, lbl } from "../lib/theme";
-import { STATUS_LABEL, backlinkStatusLabel } from "../lib/constants";
-import { money } from "../lib/format";
-import { portalPath } from "../lib/router";
+import { STATUS_LABEL, backlinkStatusLabel, activityLabel } from "../lib/constants";
+import { money, ym, ymLabel, timeAgo, dateLabel, dateTimeLabel, isPastDue } from "../lib/format";
+import { portalPath, clientPath, clientTabFromPath } from "../lib/router";
+import { deliverableMonth } from "../lib/scope";
 import {
   addResourceLink, uploadResourceFile, deleteResource, fetchFileObjectUrl, MAX_FILE_BYTES,
   createKeyword, updateKeyword, deleteKeyword,
@@ -15,7 +19,7 @@ import { Empty, HealthBadge } from "./ui";
 import { KeywordRows, KeywordForm, keywordSummary } from "./Keywords";
 import ClientScope from "./ClientScope";
 import ClientReport from "./ClientReport";
-import Activity from "./Activity";
+import Activity, { activityIcon } from "./Activity";
 
 const fmtSize = (n) => {
   const b = Number(n) || 0;
@@ -24,12 +28,27 @@ const fmtSize = (n) => {
   return `${(b / 1024 / 1024).toFixed(1)} MB`;
 };
 
-// The detail view is now its own page (URL: /clients/:id) rather than a modal
-// overlay, so it flows in the normal document instead of a fixed-position card.
-const pageCard = {
-  background: "#fff", borderRadius: 18, padding: 26, width: "100%", maxWidth: 720,
-  margin: "0 auto", border: BD, boxShadow: SH,
-};
+/* ---------------- client workspace layout ----------------
+   The page used to be one ~11-section column, which buried the daily work
+   under one-time setup. It's now a workspace: a compact header card with the
+   client's vitals, then a tab bar that groups the sections by job —
+   Overview (snapshot) · Activity (CRM timeline) · SEO (ranks, links, GSC) ·
+   Scope (retainer vs delivered) · Report (client-facing monthly report) ·
+   Files & Sharing (resources, portal link, report email). The active tab
+   lives in the URL (/clients/:id/:tab) so every tab is linkable. */
+
+const pageWrap = { width: "100%", maxWidth: 880, margin: "0 auto" };
+const card = { background: "#fff", borderRadius: 18, padding: 26, border: BD, boxShadow: SH };
+const secTitle = { display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 };
+
+export const CLIENT_TABS = [
+  { k: "overview", l: "Overview", i: LayoutDashboard },
+  { k: "activity", l: "Activity", i: Clock },
+  { k: "seo", l: "SEO", i: Search },
+  { k: "scope", l: "Scope & Work", i: ClipboardList },
+  { k: "report", l: "Report", i: FileText },
+  { k: "sharing", l: "Files & Sharing", i: Share2 },
+];
 
 /* ---------------- Google Search Console panel ----------------
    Lazily fetches this client's organic performance (filled nightly by the
@@ -192,7 +211,7 @@ function GscPanel({ client }) {
 
   return (
     <div className="no-print" style={{ marginTop: 22 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
+      <div style={secTitle}>
         <BarChart3 size={16} /> Organic search (Google Search Console)
       </div>
       {body}
@@ -209,9 +228,24 @@ function Detail({ label, value }) {
   );
 }
 
+// Clickable snapshot tile on the Overview tab: shows one number that matters
+// and jumps to the tab where you act on it.
+function StatTile({ icon: I, label, value, hint, onClick, alert }) {
+  return (
+    <button type="button" onClick={onClick} className="kpi-click" aria-label={`${label}: ${value}. Open the ${label} section`}
+      style={{ background: alert ? "#f7dede" : "#faf8f2", border: BDt, borderRadius: 12, padding: "12px 14px", textAlign: "left", cursor: "pointer", color: ink, font: "inherit", boxShadow: SHs }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, fontWeight: 800, color: alert ? "#c0392b" : "#6b6580", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        <I size={13} /> {label}
+      </div>
+      <div style={{ fontSize: 19, fontWeight: 900, fontFamily: disp, marginTop: 4 }}>{value}</div>
+      {hint && <div style={{ fontSize: 11.5, fontWeight: 700, color: "#6b6580", marginTop: 2 }}>{hint}</div>}
+    </button>
+  );
+}
+
 // onChanged(...sets) asks the Dashboard to re-fetch: pass the dataset names the
 // mutation touched (e.g. "resources") for a narrow refresh, no args for a full one.
-export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], backlinks = [], aiCitations = [], reports = [], retainers = [], activities = [], payments = [], tasks = [], author = "", googleConnected = false, isAdmin, onBack, onEdit, onDeleteClient, onChanged }) {
+export default function ClientDetail({ client, resources, keywords = [], keywordHistory = [], deliverables = [], backlinks = [], aiCitations = [], reports = [], retainers = [], activities = [], payments = [], tasks = [], author = "", googleConnected = false, isAdmin, path = "", navigate, onBack, onEdit, onDeleteClient, onChanged }) {
   const health = computeHealth(client, { deliverables, payments, tasks, keywords, activities });
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
@@ -226,6 +260,11 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
   const [email, setEmail] = useState({ recipient: "", enabled: true, loaded: false, saved: false });
   const fileRef = useRef(null);
   const toast = useToast();
+
+  // Active tab comes from the URL; anything unknown falls back to Overview.
+  const urlTab = clientTabFromPath(path);
+  const tab = CLIENT_TABS.some((t) => t.k === urlTab) ? urlTab : "overview";
+  const goTab = (k) => navigate(clientPath(client.id, k));
 
   const guard = async (fn, okMsg) => {
     setErr(""); setBusy(true);
@@ -316,14 +355,257 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
   const liveLinks = backlinks.filter((b) => b.status === "live").length;
   const recentLinks = backlinks.slice(0, 5); // already newest-first from the API
 
+  /* ---------- Overview snapshot numbers ---------- */
+  const monthNow = ym(new Date());
+  const monthDeliverables = deliverables.filter((d) => deliverableMonth(d) === monthNow);
+  const deliveredNow = monthDeliverables.filter((d) => d.status === "delivered").length;
+  const lastTouch = activities[0] || null; // already happened_at desc from the parent
+  const followUps = activities.filter((a) => a.follow_up_date).map((a) => String(a.follow_up_date).slice(0, 10)).sort();
+  const overdueFu = followUps.filter((d) => isPastDue(d));
+  const nextFu = followUps.find((d) => !isPastDue(d));
+  const recentActivities = activities.slice(0, 3);
+
+  const errBanner = err && (
+    <div style={{ background: tint, border: BDt, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, marginBottom: 14 }}>{err}</div>
+  );
+
+  /* ---------- Overview tab ---------- */
+  const overviewTab = (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12, marginBottom: 22 }}>
+        <StatTile icon={Search} label="Keywords" onClick={() => goTab("seo")}
+          value={kstats.total ? (kstats.avg == null ? `${kstats.total}` : `avg #${kstats.avg}`) : "—"}
+          hint={kstats.total ? `${kstats.top10} in top 10 · ${kstats.total} tracked` : "None tracked yet"} />
+        <StatTile icon={Link2} label="Backlinks" onClick={() => goTab("seo")}
+          value={backlinks.length ? String(liveLinks) : "—"}
+          hint={backlinks.length ? `live of ${backlinks.length} total` : "None tracked yet"} />
+        <StatTile icon={ClipboardList} label="Deliverables" onClick={() => goTab("scope")}
+          value={monthDeliverables.length ? `${deliveredNow}/${monthDeliverables.length}` : "—"}
+          hint={monthDeliverables.length ? `delivered in ${ymLabel(monthNow)}` : `Nothing planned for ${ymLabel(monthNow)}`} />
+        <StatTile icon={Clock} label="Last contact" onClick={() => goTab("activity")}
+          value={lastTouch ? timeAgo(lastTouch.happened_at) : "Never"}
+          hint={lastTouch ? activityLabel(lastTouch.type) : "Log the first touchpoint"} />
+        <StatTile icon={CalendarClock} label="Follow-up" onClick={() => goTab("activity")} alert={overdueFu.length > 0}
+          value={overdueFu.length ? `${overdueFu.length} overdue` : nextFu ? dateLabel(nextFu) : "None"}
+          hint={overdueFu.length ? "Needs attention" : nextFu ? "Next reminder" : "No reminder set"} />
+      </div>
+
+      <div>
+        <div style={lbl}>Notes</div>
+        <div style={{ fontSize: 13.5, fontWeight: 500, color: "#4b4560", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "#faf8f2", border: BDt, borderRadius: 10, padding: "12px 14px", minHeight: 44 }}>
+          {client.notes ? client.notes : <span style={{ opacity: 0.5 }}>No notes yet. Use Edit to add some.</span>}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 22 }}>
+        <div style={{ ...secTitle, marginBottom: 0, flexWrap: "wrap" }}>
+          <Clock size={16} /> <span style={{ flex: 1 }}>Recent activity</span>
+          <button style={{ ...btn(accent, "#fff"), padding: "8px 12px", fontSize: 12.5 }} onClick={() => goTab("activity")}>
+            <Plus size={15} /> Log activity
+          </button>
+        </div>
+        {recentActivities.length === 0 ? (
+          <Empty>No activity logged yet. Record your first call, email, or note.</Empty>
+        ) : (
+          <div style={{ marginTop: 12 }}>
+            {recentActivities.map((a) => {
+              const I = activityIcon(a.type);
+              return (
+                <div key={a.id} style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "11px 0", borderBottom: "1px solid #f0ece2" }}>
+                  <div style={{ width: 30, height: 30, flexShrink: 0, borderRadius: 8, background: tint, border: BDt, display: "flex", alignItems: "center", justifyContent: "center", color: accent }}>
+                    <I size={14} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 700 }}>
+                      <span style={{ color: accent, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.04em", fontSize: 10.5 }}>{activityLabel(a.type)}</span>
+                      {" · "}{a.author ? `${a.author} · ` : ""}{dateTimeLabel(a.happened_at)}
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#332f45", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.body}</div>
+                  </div>
+                </div>
+              );
+            })}
+            {activities.length > recentActivities.length && (
+              <button style={{ ...btn("#fff", ink), marginTop: 12, padding: "8px 12px", fontSize: 12.5 }} onClick={() => goTab("activity")}>
+                View all {activities.length} activities
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+
+  /* ---------- SEO tab (keywords + backlinks + Search Console) ---------- */
+  const seoTab = (
+    <>
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          <h2 style={{ ...secTitle, marginBottom: 0, flex: 1 }}>
+            <Search size={16} /> Keyword ranks
+          </h2>
+          {keywords.length > 0 && (
+            <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>
+              avg {kstats.avg == null ? "—" : `#${kstats.avg}`} · {kstats.top10} in top 10
+            </span>
+          )}
+          <button style={btn(accent, "#fff")} disabled={busy} onClick={() => { setKwEditing(null); setKwForm(true); }}><Plus size={15} /> Add keyword</button>
+        </div>
+        <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
+          <KeywordRows keywords={keywords} history={keywordHistory} onEdit={(k) => { setKwEditing(k); setKwForm(true); }} onDelete={removeKeyword} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 22 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          <div style={{ ...secTitle, marginBottom: 0, flex: 1 }}>
+            <Link2 size={16} /> Backlinks
+          </div>
+          {backlinks.length > 0 && (
+            <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>
+              {liveLinks} live / {backlinks.length} total
+            </span>
+          )}
+        </div>
+        {backlinks.length === 0 ? (
+          <Empty>No backlinks tracked yet. Add them from the Backlinks tab.</Empty>
+        ) : (
+          <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
+            {recentLinks.map((b) => (
+              <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: "1px solid #f0ece2" }}>
+                {b.url ? (
+                  <a href={b.url} target="_blank" rel="noopener noreferrer" title={b.url}
+                    style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 800, color: ink, textDecoration: "none", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                    {String(b.url).replace(/^https?:\/\//, "")}
+                  </a>
+                ) : (
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 800, color: "#a39db5" }}>{b.anchor_text || "(no URL)"}</span>
+                )}
+                <span style={{ fontSize: 10.5, fontWeight: 800, padding: "3px 9px", borderRadius: 7, border: BDt, textTransform: "uppercase", background: b.status === "live" ? "#d7f5df" : b.status === "lost" ? "#f7dede" : tint }}>
+                  {backlinkStatusLabel(b.status)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <GscPanel client={client} />
+    </>
+  );
+
+  /* ---------- Files & Sharing tab ---------- */
+  const sharingTab = (
+    <>
+      <div>
+        <h2 style={secTitle}>
+          <Paperclip size={16} /> Resources & files
+        </h2>
+
+        {/* add link */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          <input style={{ ...input, flex: 1, minWidth: 120 }} placeholder="Label (e.g. Keyword sheet)" aria-label="Resource label" value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} />
+          <input style={{ ...input, flex: 2, minWidth: 160 }} placeholder="Paste a link (Drive, Canva, Sheets…)" aria-label="Resource link URL" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} />
+          <button style={btn(accent, "#fff")} disabled={busy} onClick={addLink}><Link2 size={15} /> Add link</button>
+        </div>
+
+        {/* upload file */}
+        <div style={{ marginBottom: 16 }}>
+          <input ref={fileRef} type="file" style={{ display: "none" }} onChange={onPickFile} />
+          <button style={btn("#fff", ink)} disabled={busy} onClick={() => fileRef.current?.click()}>
+            <Upload size={15} /> {busy ? "Working…" : "Upload file"}
+          </button>
+          <span style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 600, marginLeft: 10 }}>Max 4 MB per file.</span>
+        </div>
+
+        {/* list */}
+        {resources.length === 0 ? (
+          <Empty>No resources yet. Add a link or upload a file above.</Empty>
+        ) : (
+          <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
+            {resources.map((r) => (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderBottom: "1px solid #f0ece2" }}>
+                <span style={{ display: "flex", color: accent }}>{r.kind === "file" ? <FileText size={17} /> : <Link2 size={17} />}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.label || r.filename || r.url}</div>
+                  <div style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {r.kind === "file" ? `${r.filename || "file"} · ${fmtSize(r.size)}` : r.url}
+                  </div>
+                </div>
+                {r.kind === "file"
+                  ? <button style={iconBtn} title="Open file" aria-label={`Open file ${r.filename || r.label || ""}`} disabled={busy} onClick={() => openFile(r)}><ExternalLink size={15} /></button>
+                  : <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ ...iconBtn, textDecoration: "none" }} title="Open link" aria-label={`Open link ${r.label || r.url}`}><ExternalLink size={15} /></a>}
+                <button style={iconBtn} title="Remove" aria-label="Remove resource" disabled={busy} onClick={() => removeResource(r.id)}><Trash2 size={15} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ marginTop: 22, borderTop: "2px solid #f0ece2", paddingTop: 20 }}>
+        <div style={secTitle}>
+          <Share2 size={16} /> Client portal
+        </div>
+        <div style={{ border: BDt, borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
+          {portal === null ? (
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: "#6b6580" }}>Loading…</span>
+          ) : !portal.token ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ flex: 1, minWidth: 200, fontSize: 12.5, fontWeight: 600, color: "#6b6580" }}>
+                No share link yet. Create one to give this client a read-only view of their rankings, deliverables and monthly report — no fees or internal notes.
+              </span>
+              <button style={btn(accent, "#fff")} disabled={busy} onClick={() => createLink(false)}><Plus size={15} /> Create link</button>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 7, border: BDt, background: portal.enabled ? "#d7f5df" : "#f7dede", color: portal.enabled ? "#1f9d57" : "#c0392b" }}>
+                  {portal.enabled ? "Link active" : "Link disabled"}
+                </span>
+                <span style={{ flex: 1, minWidth: 160, fontSize: 12, fontWeight: 600, color: "#6b6580", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }} title={portalUrl}>
+                  {portalUrl}
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button style={btn("#fff", ink)} disabled={busy} onClick={copyLink}><Copy size={15} /> {copied ? "Copied!" : "Copy link"}</button>
+                <button style={btn("#fff", ink)} disabled={busy} onClick={() => createLink(true)}><RefreshCw size={15} /> Regenerate</button>
+                <button style={btn(portal.enabled ? "#fff" : accent, portal.enabled ? ink : "#fff")} disabled={busy} onClick={togglePortal}>
+                  {portal.enabled ? "Disable link" : "Enable link"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={secTitle}>
+          <Mail size={16} /> Monthly report email
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input style={{ ...input, flex: 2, minWidth: 180 }} type="email" placeholder="client@example.com"
+            value={email.recipient} onChange={(e) => setEmail((x) => ({ ...x, recipient: e.target.value, saved: false }))} />
+          <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+            <input type="checkbox" checked={email.enabled} onChange={(e) => setEmail((x) => ({ ...x, enabled: e.target.checked, saved: false }))} style={{ width: 16, height: 16, accentColor: accent }} />
+            Enabled
+          </label>
+          <button style={btn(accent, "#fff")} disabled={busy || !email.loaded} onClick={saveEmail}>{email.saved ? "Saved" : "Save"}</button>
+        </div>
+        <p style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 600, marginTop: 8 }}>
+          Gets an automatic SEO report on the 1st of each month (needs RESEND_API_KEY). Clear the address and untick Enabled to remove it.
+        </p>
+      </div>
+    </>
+  );
+
   return (
     <>
-    <div>
+    <div style={pageWrap}>
       <button className="no-print" style={{ ...btn("#fff", ink), marginBottom: 18 }} onClick={onBack}>
         <ArrowLeft size={16} /> Back to clients
       </button>
-      <div style={pageCard}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+
+      {/* header card: who this client is, at a glance */}
+      <div className="no-print" style={{ ...card, padding: "22px 26px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div>
             <h1 style={{ fontFamily: disp, fontSize: 22, lineHeight: 1.1 }}>{client.name}</h1>
             <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -333,12 +615,12 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button style={iconBtn} title="Edit" aria-label="Edit client" onClick={() => onEdit(client)}><Pencil size={16} /></button>
+            <button style={btn("#fff", ink)} onClick={() => onEdit(client)}><Pencil size={15} /> Edit</button>
             {isAdmin && <button style={iconBtn} title="Delete client" aria-label="Delete client" onClick={() => onDeleteClient(client.id)}><Trash2 size={16} /></button>}
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 14, padding: "16px 0", borderTop: "2px solid #f0ece2", borderBottom: "2px solid #f0ece2" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 14, paddingTop: 16, borderTop: "2px solid #f0ece2", marginTop: 16 }}>
           <Detail label="Niche" value={client.niche} />
           <Detail label="Package" value={client.package} />
           <Detail label="Team member" value={client.team_member} />
@@ -348,175 +630,33 @@ export default function ClientDetail({ client, resources, keywords = [], keyword
           <Detail label="Risk" value={client.risk} />
           <Detail label="Added by" value={client.created_by} />
         </div>
+      </div>
 
-        <div style={{ marginTop: 16 }}>
-          <div style={lbl}>Notes</div>
-          <div style={{ fontSize: 13.5, fontWeight: 500, color: "#4b4560", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "#faf8f2", border: BDt, borderRadius: 10, padding: "12px 14px", minHeight: 44 }}>
-            {client.notes ? client.notes : <span style={{ opacity: 0.5 }}>No notes yet. Use Edit to add some.</span>}
-          </div>
-        </div>
-
-        <Activity client={client} activities={activities} author={author} googleConnected={googleConnected} onChanged={onChanged} />
-
-        <div style={{ marginTop: 22, borderTop: "2px solid #f0ece2", paddingTop: 20 }}>
-          <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
-            <Paperclip size={16} /> Resources & files
-          </h2>
-
-          {err && <div style={{ background: tint, border: BDt, borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
-
-          {/* add link */}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-            <input style={{ ...input, flex: 1, minWidth: 120 }} placeholder="Label (e.g. Keyword sheet)" aria-label="Resource label" value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} />
-            <input style={{ ...input, flex: 2, minWidth: 160 }} placeholder="Paste a link (Drive, Canva, Sheets…)" aria-label="Resource link URL" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} />
-            <button style={btn(accent, "#fff")} disabled={busy} onClick={addLink}><Link2 size={15} /> Add link</button>
-          </div>
-
-          {/* upload file */}
-          <div style={{ marginBottom: 16 }}>
-            <input ref={fileRef} type="file" style={{ display: "none" }} onChange={onPickFile} />
-            <button style={btn("#fff", ink)} disabled={busy} onClick={() => fileRef.current?.click()}>
-              <Upload size={15} /> {busy ? "Working…" : "Upload file"}
+      {/* tab bar: one place per job instead of one endless column */}
+      <div className="scroll-x no-print" role="tablist" aria-label="Client sections" style={{ display: "flex", gap: 8, margin: "16px 0" }}>
+        {CLIENT_TABS.map((t) => {
+          const I = t.i, on = tab === t.k;
+          return (
+            <button key={t.k} role="tab" aria-selected={on} onClick={() => goTab(t.k)}
+              style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 15px", borderRadius: 10, border: BD, whiteSpace: "nowrap", flexShrink: 0, background: on ? accent : "#fff", color: on ? "#fff" : ink, fontWeight: 800, fontSize: 13, cursor: "pointer", boxShadow: on ? SHs : "none" }}>
+              <I size={15} /> {t.l}
+              {t.k === "activity" && activities.length > 0 && (
+                <span style={{ fontSize: 10.5, fontWeight: 800, background: on ? "rgba(255,255,255,.25)" : tint, borderRadius: 6, padding: "1px 7px" }}>{activities.length}</span>
+              )}
             </button>
-            <span style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 600, marginLeft: 10 }}>Max 4 MB per file.</span>
-          </div>
+          );
+        })}
+      </div>
 
-          {/* list */}
-          {resources.length === 0 ? (
-            <Empty>No resources yet. Add a link or upload a file above.</Empty>
-          ) : (
-            <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
-              {resources.map((r) => (
-                <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderBottom: "1px solid #f0ece2" }}>
-                  <span style={{ display: "flex", color: accent }}>{r.kind === "file" ? <FileText size={17} /> : <Link2 size={17} />}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.label || r.filename || r.url}</div>
-                    <div style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {r.kind === "file" ? `${r.filename || "file"} · ${fmtSize(r.size)}` : r.url}
-                    </div>
-                  </div>
-                  {r.kind === "file"
-                    ? <button style={iconBtn} title="Open file" aria-label={`Open file ${r.filename || r.label || ""}`} disabled={busy} onClick={() => openFile(r)}><ExternalLink size={15} /></button>
-                    : <a href={r.url} target="_blank" rel="noopener noreferrer" style={{ ...iconBtn, textDecoration: "none" }} title="Open link" aria-label={`Open link ${r.label || r.url}`}><ExternalLink size={15} /></a>}
-                  <button style={iconBtn} title="Remove" aria-label="Remove resource" disabled={busy} onClick={() => removeResource(r.id)}><Trash2 size={15} /></button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div style={{ marginTop: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
-            <Share2 size={16} /> Client portal
-          </div>
-          <div style={{ border: BDt, borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
-            {portal === null ? (
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#6b6580" }}>Loading…</span>
-            ) : !portal.token ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ flex: 1, minWidth: 200, fontSize: 12.5, fontWeight: 600, color: "#6b6580" }}>
-                  No share link yet. Create one to give this client a read-only view of their rankings, deliverables and monthly report — no fees or internal notes.
-                </span>
-                <button style={btn(accent, "#fff")} disabled={busy} onClick={() => createLink(false)}><Plus size={15} /> Create link</button>
-              </div>
-            ) : (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 7, border: BDt, background: portal.enabled ? "#d7f5df" : "#f7dede", color: portal.enabled ? "#1f9d57" : "#c0392b" }}>
-                    {portal.enabled ? "Link active" : "Link disabled"}
-                  </span>
-                  <span style={{ flex: 1, minWidth: 160, fontSize: 12, fontWeight: 600, color: "#6b6580", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }} title={portalUrl}>
-                    {portalUrl}
-                  </span>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button style={btn("#fff", ink)} disabled={busy} onClick={copyLink}><Copy size={15} /> {copied ? "Copied!" : "Copy link"}</button>
-                  <button style={btn("#fff", ink)} disabled={busy} onClick={() => createLink(true)}><RefreshCw size={15} /> Regenerate</button>
-                  <button style={btn(portal.enabled ? "#fff" : accent, portal.enabled ? ink : "#fff")} disabled={busy} onClick={togglePortal}>
-                    {portal.enabled ? "Disable link" : "Enable link"}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", marginBottom: 12 }}>
-            <Mail size={16} /> Monthly report email
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <input style={{ ...input, flex: 2, minWidth: 180 }} type="email" placeholder="client@example.com"
-              value={email.recipient} onChange={(e) => setEmail((x) => ({ ...x, recipient: e.target.value, saved: false }))} />
-            <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
-              <input type="checkbox" checked={email.enabled} onChange={(e) => setEmail((x) => ({ ...x, enabled: e.target.checked, saved: false }))} style={{ width: 16, height: 16, accentColor: accent }} />
-              Enabled
-            </label>
-            <button style={btn(accent, "#fff")} disabled={busy || !email.loaded} onClick={saveEmail}>{email.saved ? "Saved" : "Save"}</button>
-          </div>
-          <p style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 600, marginTop: 8 }}>
-            Gets an automatic SEO report on the 1st of each month (needs RESEND_API_KEY). Clear the address and untick Enabled to remove it.
-          </p>
-        </div>
-
-        <div style={{ marginTop: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-            <h2 style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>
-              <Search size={16} /> Keyword ranks
-            </h2>
-            {keywords.length > 0 && (
-              <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>
-                avg {kstats.avg == null ? "—" : `#${kstats.avg}`} · {kstats.top10} in top 10
-              </span>
-            )}
-            <button style={btn(accent, "#fff")} disabled={busy} onClick={() => { setKwEditing(null); setKwForm(true); }}><Plus size={15} /> Add keyword</button>
-          </div>
-          <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
-            <KeywordRows keywords={keywords} history={keywordHistory} onEdit={(k) => { setKwEditing(k); setKwForm(true); }} onDelete={removeKeyword} />
-          </div>
-        </div>
-
-        <div style={{ marginTop: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: disp, fontSize: 15, textTransform: "uppercase", flex: 1 }}>
-              <Link2 size={16} /> Backlinks
-            </div>
-            {backlinks.length > 0 && (
-              <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>
-                {liveLinks} live / {backlinks.length} total
-              </span>
-            )}
-          </div>
-          {backlinks.length === 0 ? (
-            <Empty>No backlinks tracked yet. Add them from the Backlinks tab.</Empty>
-          ) : (
-            <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
-              {recentLinks.map((b) => (
-                <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: "1px solid #f0ece2" }}>
-                  {b.url ? (
-                    <a href={b.url} target="_blank" rel="noopener noreferrer" title={b.url}
-                      style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 800, color: ink, textDecoration: "none", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                      {String(b.url).replace(/^https?:\/\//, "")}
-                    </a>
-                  ) : (
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 800, color: "#a39db5" }}>{b.anchor_text || "(no URL)"}</span>
-                  )}
-                  <span style={{ fontSize: 10.5, fontWeight: 800, padding: "3px 9px", borderRadius: 7, border: BDt, textTransform: "uppercase", background: b.status === "live" ? "#d7f5df" : b.status === "lost" ? "#f7dede" : tint }}>
-                    {backlinkStatusLabel(b.status)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <GscPanel client={client} />
-
-        <ClientScope client={client} retainers={retainers} deliverables={deliverables} onChanged={onChanged} />
-
-        <ClientReport client={client} keywords={keywords} deliverables={deliverables} backlinks={backlinks} aiCitations={aiCitations} reports={reports} retainers={retainers} onChanged={onChanged} />
-
-        <button className="no-print" style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 22, justifyContent: "center" }} onClick={() => onEdit(client)}>
-          <Pencil size={15} /> Edit client details
-        </button>
+      {/* active tab content */}
+      <div style={card}>
+        <div className="no-print">{errBanner}</div>
+        {tab === "overview" && overviewTab}
+        {tab === "activity" && <Activity client={client} activities={activities} author={author} googleConnected={googleConnected} onChanged={onChanged} />}
+        {tab === "seo" && seoTab}
+        {tab === "scope" && <ClientScope client={client} retainers={retainers} deliverables={deliverables} onChanged={onChanged} />}
+        {tab === "report" && <ClientReport client={client} keywords={keywords} deliverables={deliverables} backlinks={backlinks} aiCitations={aiCitations} reports={reports} retainers={retainers} onChanged={onChanged} />}
+        {tab === "sharing" && sharingTab}
       </div>
     </div>
 

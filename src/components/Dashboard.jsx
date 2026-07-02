@@ -349,6 +349,8 @@ export default function Dashboard({ session, onSignOut }) {
                   author={session.name}
                   googleConnected={googleConnected}
                   isAdmin={isAdmin}
+                  path={path}
+                  navigate={navigate}
                   onBack={backToClients}
                   onEdit={(c) => { setEditing(c); setShowForm(true); }}
                   onDeleteClient={delClient}
