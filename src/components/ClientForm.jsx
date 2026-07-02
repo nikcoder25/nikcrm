@@ -8,7 +8,7 @@ import { Field, Pick, Row } from "./ui";
 export default function ClientForm({ initial, onClose, onSave }) {
   const [f, setF] = useState(initial || {
     name: "", niche: "", status: "active", source: "Direct", package: "Standard",
-    fee: "", team_member: "", start_month: "", renewal_month: "", risk: "low", notes: "",
+    fee: "", team_member: "", start_month: "", renewal_month: "", risk: "low", notes: "", gsc_property: "",
   });
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   const submit = () => { if (!f.name.trim()) return; onSave({ ...f, fee: Number(f.fee) || 0 }); };
@@ -36,6 +36,7 @@ export default function ClientForm({ initial, onClose, onSave }) {
           <Field label="Start month" value={f.start_month} onChange={(v) => set("start_month", v)} type="month" />
           <Field label="Renewal month" value={f.renewal_month} onChange={(v) => set("renewal_month", v)} type="month" />
         </Row>
+        <Field label="Search Console property" value={f.gsc_property || ""} onChange={(v) => set("gsc_property", v)} placeholder="sc-domain:example.com" />
         <label style={lbl}>Notes</label>
         <textarea style={{ ...input, minHeight: 60, resize: "vertical" }} value={f.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Notes, special requests..." />
         <button style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 20, justifyContent: "center" }} onClick={submit}>{initial ? "Save changes" : "Add client"}</button>

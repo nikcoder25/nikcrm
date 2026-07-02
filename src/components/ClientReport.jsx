@@ -5,10 +5,41 @@ import { typeLabel, deliverableStatusLabel } from "../lib/constants";
 import { ym, ymLabel } from "../lib/format";
 import { keywordSummary, movement } from "./Keywords";
 import { scopeRows } from "../lib/scope";
-import { saveReport } from "../lib/api";
+import { saveReport, gscLoad } from "../lib/api";
 import { Empty } from "./ui";
 
 const arrow = (dir) => (dir === "up" ? "▲" : dir === "down" ? "▼" : dir === "new" ? "•" : "–");
+
+// 'YYYY-MM' one month earlier ('2026-01' → '2025-12').
+const prevYm = (m) => {
+  const [y, mo] = m.split("-").map(Number);
+  const d = new Date(Date.UTC(y, mo - 2, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+
+// Totals for one month's gsc_daily rows: clicks, impressions and the
+// impression-weighted average position. null when the month has no rows.
+function gscMonthTotals(daily, month) {
+  const rows = daily.filter((d) => String(d.date).slice(0, 7) === month);
+  if (!rows.length) return null;
+  let clicks = 0, impressions = 0, posWeight = 0, posSum = 0;
+  for (const d of rows) {
+    const imp = Number(d.impressions) || 0;
+    clicks += Number(d.clicks) || 0;
+    impressions += imp;
+    posWeight += (Number(d.position) || 0) * imp;
+    posSum += Number(d.position) || 0;
+  }
+  const position = impressions > 0 ? posWeight / impressions : posSum / rows.length;
+  return { clicks, impressions, position };
+}
+
+// "12,340 (▲ +8%)" style compare against the previous month; "" without one.
+function vsPrev(cur, prev) {
+  if (prev == null || !(prev > 0)) return "";
+  const pct = Math.round(((cur - prev) / prev) * 100);
+  return ` (${pct > 0 ? "▲ +" : pct < 0 ? "▼ " : ""}${pct}% vs prev month)`;
+}
 
 export default function ClientReport({ client, keywords = [], deliverables = [], reports = [], retainers = [], onChanged }) {
   const [month, setMonth] = useState(ym(new Date()));
@@ -22,6 +53,25 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
     setDraft(reports.find((r) => r.period === month)?.summary || "");
     setMsg("");
   }, [month]);
+
+  // Search Console data for the selected month (daily covers ~90 days, so the
+  // previous month is usually in there too). Only fetched once the client is
+  // linked to a GSC property; failures just hide the section.
+  const [gsc, setGsc] = useState(null);
+  useEffect(() => {
+    setGsc(null);
+    if (!String(client.gsc_property || "").trim()) return;
+    let alive = true;
+    gscLoad(client.id, month)
+      .then((r) => { if (alive) setGsc(r); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [client.id, client.gsc_property, month]);
+
+  const gscDaily = gsc?.daily || [];
+  const gscMonth = gscMonthTotals(gscDaily, month);
+  const gscPrev = gscMonthTotals(gscDaily, prevYm(month));
+  const gscQueries = (gsc?.queries || []).slice(0, 10);
 
   const months = (() => {
     const set = new Set([month]);
@@ -104,6 +154,40 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
             </table>
           )}
         </div>
+
+        {/* Organic search (Google Search Console) — only when the month has data */}
+        {gscMonth && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", marginBottom: 8 }}>Organic search</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#4b4560", marginBottom: 10 }}>
+              Clicks <b>{gscMonth.clicks.toLocaleString()}</b>{vsPrev(gscMonth.clicks, gscPrev?.clicks)}
+              {" · "}Impressions <b>{gscMonth.impressions.toLocaleString()}</b>{vsPrev(gscMonth.impressions, gscPrev?.impressions)}
+              {" · "}Avg position <b>{gscMonth.position.toFixed(1)}</b>{gscPrev ? ` (prev ${gscPrev.position.toFixed(1)})` : ""}
+            </div>
+            {gscQueries.length > 0 && (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", borderBottom: BDt }}>
+                    <th style={{ padding: "6px 8px" }}>Top queries</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Clicks</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Impressions</th>
+                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Avg position</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {gscQueries.map((q) => (
+                    <tr key={q.query} style={{ borderBottom: "1px solid #f0ece2" }}>
+                      <td style={{ padding: "6px 8px", fontWeight: 700, wordBreak: "break-word" }}>{q.query}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 800 }}>{(Number(q.clicks) || 0).toLocaleString()}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right", color: "#6b6580" }}>{(Number(q.impressions) || 0).toLocaleString()}</td>
+                      <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 800 }}>{q.position == null ? "—" : Number(q.position).toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
 
         {/* Deliverables */}
         <div style={{ marginBottom: 18 }}>

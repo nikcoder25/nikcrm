@@ -43,6 +43,10 @@ async function ensureSchema(sql) {
     created_by text default '',
     created_at timestamptz default now()
   )`;
+  // Google Search Console link: which property this client maps to, e.g.
+  // "sc-domain:example.com" or "https://example.com/". ALTER ... IF NOT EXISTS
+  // upgrades existing databases in place.
+  await sql`alter table clients add column if not exists gsc_property text default ''`;
   await sql`create table if not exists tasks (
     id uuid primary key default gen_random_uuid(),
     client_id uuid references clients(id) on delete cascade,
@@ -150,6 +154,29 @@ async function ensureSchema(sql) {
     recipient text not null,
     enabled boolean default true
   )`;
+  // Google Search Console organic performance, filled nightly by gsc-sync.mjs.
+  // gsc_daily keeps one row per client per day (rolling window, upserted);
+  // gsc_queries keeps the top queries per client per month (replaced on sync).
+  await sql`create table if not exists gsc_daily (
+    id uuid primary key default gen_random_uuid(),
+    client_id uuid references clients(id) on delete cascade,
+    date date not null,
+    clicks integer default 0,
+    impressions integer default 0,
+    ctr real default 0,
+    position real default 0,
+    unique (client_id, date)
+  )`;
+  await sql`create table if not exists gsc_queries (
+    id uuid primary key default gen_random_uuid(),
+    client_id uuid references clients(id) on delete cascade,
+    month text not null,                     -- 'YYYY-MM'
+    query text not null,
+    clicks integer default 0,
+    impressions integer default 0,
+    position real default 0,
+    unique (client_id, month, query)
+  )`;
   // Audit trail. client_id has NO foreign key on purpose: activity must
   // survive client deletion, so the human-readable name lives in
   // entity_label/detail instead of being joined at read time.
@@ -166,8 +193,9 @@ async function ensureSchema(sql) {
   // Postgres does NOT auto-index foreign-key columns. Without these, every
   // per-client lookup and every ON DELETE CASCADE does a full table scan,
   // which degrades linearly as the client count grows. Idempotent, so they
-  // cost nothing after the first run. (payments, client_reports and
-  // client_retainers are covered by unique constraints leading with client_id.)
+  // cost nothing after the first run. (payments, client_reports,
+  // client_retainers, gsc_daily and gsc_queries are covered by unique
+  // constraints leading with client_id.)
   await Promise.all([
     sql`create index if not exists idx_tasks_client on tasks (client_id)`,
     sql`create index if not exists idx_resources_client on resources (client_id)`,
@@ -236,6 +264,15 @@ async function stripePost(path, params) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error?.message || `Stripe error (HTTP ${res.status})`);
   return data;
+}
+
+// A Search Console property is either a domain property ("sc-domain:example.com")
+// or a URL-prefix property ("https://example.com/"). Returns the trimmed value,
+// "" for blank input, or null when it's neither form.
+function safeGscProperty(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  return s.startsWith("sc-domain:") || s.startsWith("http") ? s : null;
 }
 
 // Rank is a positive integer or null (unranked). Coerce loosely from the UI.
@@ -459,6 +496,28 @@ export default async (req) => {
         return json({ points });
       }
 
+      case "gscLoad": {
+        // Search Console data for one client, fetched lazily by the detail
+        // view (not part of the global load — it's per-client and can be big).
+        // daily: the last 90 days; queries: the top queries for one month —
+        // payload.month ('YYYY-MM', used by the monthly report) or, by
+        // default, the latest month that has rows.
+        if (!payload.client_id) return json({ error: "Missing client." }, 400);
+        const daily = await sql`select date, clicks, impressions, ctr, position from gsc_daily
+          where client_id=${payload.client_id} and date >= current_date - 90 order by date`;
+        let month = String(payload.month || "").trim();
+        if (!month) {
+          const latest = await sql`select max(month) as month from gsc_queries where client_id=${payload.client_id}`;
+          month = latest[0]?.month || "";
+        }
+        const queries = month
+          ? await sql`select query, clicks, impressions, position from gsc_queries
+              where client_id=${payload.client_id} and month=${month}
+              order by clicks desc, impressions desc, query`
+          : [];
+        return json({ daily, queries, month: month || null });
+      }
+
       case "clientSave": {
         const c = payload;
         if (!c.name || !String(c.name).trim()) return json({ error: "Client name is required." }, 400);
@@ -467,22 +526,26 @@ export default async (req) => {
           || badEnum("package", c.package, PACKAGES)
           || badEnum("risk", c.risk, RISKS);
         if (bad) return bad;
+        const gscProperty = safeGscProperty(c.gsc_property);
+        if (gscProperty === null) {
+          return json({ error: 'Search Console property must start with "sc-domain:" or "http" (or be left blank).' }, 400);
+        }
         if (c.id) {
           await sql`update clients set
             name=${c.name}, niche=${c.niche || ""}, status=${c.status || "active"},
             source=${c.source || "Direct"}, package=${c.package || "Standard"},
             fee=${Number(c.fee) || 0}, team_member=${c.team_member || ""},
             start_month=${c.start_month || ""}, renewal_month=${c.renewal_month || ""},
-            risk=${c.risk || "low"}, notes=${c.notes || ""}
+            risk=${c.risk || "low"}, notes=${c.notes || ""}, gsc_property=${gscProperty}
             where id=${c.id}`;
           await logActivity(sql, { actor, verb: "updated client", entity: "client", entity_label: c.name, client_id: c.id });
         } else {
           const ins = await sql`insert into clients
-            (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes, created_by)
+            (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes, gsc_property, created_by)
             values (${c.name}, ${c.niche || ""}, ${c.status || "active"}, ${c.source || "Direct"},
                     ${c.package || "Standard"}, ${Number(c.fee) || 0}, ${c.team_member || ""},
                     ${c.start_month || ""}, ${c.renewal_month || ""}, ${c.risk || "low"},
-                    ${c.notes || ""}, ${c.created_by || ""}) returning id`;
+                    ${c.notes || ""}, ${gscProperty}, ${c.created_by || ""}) returning id`;
           await logActivity(sql, { actor, verb: "created client", entity: "client", entity_label: c.name, client_id: ins[0]?.id });
         }
         return json({ ok: true });

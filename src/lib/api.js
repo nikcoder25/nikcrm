@@ -112,6 +112,12 @@ export const starKeyword = (id, starred) => call("keywordStar", { id, starred })
 // Full rank history for one keyword — `load` only ships the last 25 points.
 export const fetchKeywordHistory = (keyword_id) => call("keywordHistory", { keyword_id });
 
+/* ---------------- Google Search Console (organic performance) ---------------- */
+// Per-client GSC data, fetched lazily by the detail view: { daily, queries, month }.
+// daily = last 90 days of gsc_daily; queries = top queries for `month`
+// ('YYYY-MM', optional — defaults to the latest month that has rows).
+export const gscLoad = (client_id, month) => call("gscLoad", { client_id, month });
+
 /* ---------------- monthly reports (per-client narrative) ---------------- */
 export const saveReport = (client_id, period, summary) => call("reportSave", { client_id, period, summary });
 export const deleteReport = (id) => call("reportDelete", { id });

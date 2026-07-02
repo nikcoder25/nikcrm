@@ -25,6 +25,11 @@ create table if not exists clients (
   created_at timestamptz default now()
 );
 
+-- Google Search Console link: which property this client maps to, e.g.
+-- "sc-domain:example.com" or "https://example.com/". Kept as an ALTER
+-- (mirroring netlify/functions/data.js) so existing databases upgrade in place.
+alter table clients add column if not exists gsc_property text default '';
+
 create table if not exists tasks (
   id uuid primary key default gen_random_uuid(),
   client_id uuid references clients(id) on delete cascade,
@@ -140,6 +145,32 @@ create table if not exists client_retainers (
   unique (client_id, type)
 );
 
+-- Google Search Console organic performance, filled nightly by the scheduled
+-- function (netlify/functions/gsc-sync.mjs) when GSC_SERVICE_ACCOUNT_JSON is
+-- set. gsc_daily keeps one row per client per day (rolling window, upserted);
+-- gsc_queries keeps the top queries per client per month (replaced on sync).
+create table if not exists gsc_daily (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  date date not null,
+  clicks integer default 0,
+  impressions integer default 0,
+  ctr real default 0,
+  position real default 0,
+  unique (client_id, date)
+);
+
+create table if not exists gsc_queries (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid references clients(id) on delete cascade,
+  month text not null,                     -- 'YYYY-MM'
+  query text not null,
+  clicks integer default 0,
+  impressions integer default 0,
+  position real default 0,
+  unique (client_id, month, query)
+);
+
 -- Activity log (audit trail): who did what, when. client_id has NO foreign
 -- key on purpose — activity must survive client deletion, so the readable
 -- name is recorded in entity_label/detail instead.
@@ -157,8 +188,8 @@ create table if not exists activity (
 -- ============================================================
 -- Indexes. Postgres does not auto-index FK columns; without these,
 -- per-client lookups and ON DELETE CASCADE degrade linearly with data size.
--- (payments, client_reports and client_retainers are covered by their
--- unique constraints, which lead with client_id.)
+-- (payments, client_reports, client_retainers, gsc_daily and gsc_queries are
+-- covered by their unique constraints, which lead with client_id.)
 -- ============================================================
 create index if not exists idx_tasks_client on tasks (client_id);
 create index if not exists idx_resources_client on resources (client_id);
