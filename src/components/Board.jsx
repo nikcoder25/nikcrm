@@ -61,7 +61,12 @@ export default function Board({ clients, tasks, members = [], onAdd, onMove, onA
 
   const drop = (colKey) => {
     setOverCol(null);
-    if (dragId != null) { onMove(dragId, colKey); setDragId(null); }
+    if (dragId != null) {
+      const t = tasks.find((x) => x.id === dragId);
+      // Skip the write when the card is dropped back in its own column.
+      if (t && (t.status || "todo") !== colKey) onMove(dragId, colKey);
+      setDragId(null);
+    }
   };
 
   const errInput = (bad) => ({ ...sel, ...(bad ? { borderColor: "#c0392b", background: "#fdecec" } : null) });
@@ -124,11 +129,13 @@ export default function Board({ clients, tasks, members = [], onAdd, onMove, onA
                 <h2 style={{ fontFamily: disp, fontSize: 15, textTransform: "uppercase" }}>{col.label}</h2>
                 <span style={{ background: ink, color: "#fff", borderRadius: 20, padding: "2px 11px", fontSize: 12.5 }}>{items.length}</span>
               </div>
-              {items.length === 0 && (
-                <button onClick={() => titleRef.current?.focus()} style={{ width: "100%", textAlign: "center", padding: "18px 0", opacity: 0.5, fontWeight: 700, fontSize: 12.5, background: "none", border: "none", cursor: "pointer", color: ink }}>
-                  {col.key === "todo" ? "+ Add a task" : "Nothing here"}
+              {items.length === 0 && (col.key === "todo" ? (
+                <button onClick={() => titleRef.current?.focus()} style={{ width: "100%", textAlign: "center", padding: "18px 0", opacity: 0.55, fontWeight: 700, fontSize: 12.5, background: "none", border: "none", cursor: "pointer", color: ink }}>
+                  + Add a task
                 </button>
-              )}
+              ) : (
+                <div style={{ textAlign: "center", padding: "18px 0", opacity: 0.45, fontWeight: 700, fontSize: 12.5 }}>{dragId != null ? "Drop here" : "Nothing here"}</div>
+              ))}
               {items.map((t) => (
                 <div key={t.id} draggable
                   onDragStart={(e) => { setDragId(t.id); e.dataTransfer.effectAllowed = "move"; }}
