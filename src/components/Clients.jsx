@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useDeferredValue } from "react";
-import { Pencil, Trash2, ChevronRight, Download, Search } from "lucide-react";
+import { Pencil, Trash2, ChevronRight, Download, Search, Plus } from "lucide-react";
 import { ink, accent, tint, btn, iconBtn, sel, input } from "../lib/theme";
 import { STATUSES, STATUS_LABEL } from "../lib/constants";
 import { downloadCsv, clientsCsv } from "../lib/csv";
 import { Panel, Empty } from "./ui";
 
 /* ---------------- Clients ---------------- */
-export default function Clients({ clients, deliverables = [], isAdmin, onOpen, onEdit, onDelete }) {
+export default function Clients({ clients, deliverables = [], isAdmin, onOpen, onEdit, onDelete, onAdd }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   // Deferring the query keeps typing snappy even with hundreds of rows.
@@ -39,11 +39,12 @@ export default function Clients({ clients, deliverables = [], isAdmin, onOpen, o
           <input
             style={{ ...input, paddingLeft: 36 }}
             placeholder="Search name, niche, team member, source…"
+            aria-label="Search clients"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        <select style={{ ...sel, flex: "none", minWidth: 130 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <select style={{ ...sel, flex: "none", minWidth: 130 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
           <option value="">All statuses</option>
           {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
         </select>
@@ -54,8 +55,11 @@ export default function Clients({ clients, deliverables = [], isAdmin, onOpen, o
           <Download size={15} /> Export CSV
         </button>
       </div>
-      {clients.length === 0 ? <Panel><Empty>No clients yet. Tap "Add client".</Empty></Panel> :
-       filtered.length === 0 ? <Panel><Empty>No clients match your search.</Empty></Panel> : (
+      {clients.length === 0 ? (
+        <Panel><Empty action={onAdd && <button style={btn(accent, "#fff")} onClick={onAdd}><Plus size={16} /> Add client</button>}>
+          No clients yet. Add your first client to get started.
+        </Empty></Panel>
+      ) : filtered.length === 0 ? <Panel><Empty>No clients match your search.</Empty></Panel> : (
     <Panel>
       {filtered.map((c) => {
         const dels = delsByClient.get(c.id);
@@ -83,8 +87,8 @@ export default function Clients({ clients, deliverables = [], isAdmin, onOpen, o
               </span>
             )}
             <span style={{ padding: "5px 12px", borderRadius: 7, fontSize: 11.5, fontWeight: 800, border: "2px solid " + ink, background: c.status === "active" ? accent : "#fff", color: c.status === "active" ? "#fff" : ink }}>{STATUS_LABEL[c.status] || c.status}</span>
-            <button style={iconBtn} title="Edit" onClick={() => onEdit(c)}><Pencil size={15} /></button>
-            {isAdmin && <button style={iconBtn} title="Delete" onClick={() => onDelete(c.id)}><Trash2 size={15} /></button>}
+            <button style={iconBtn} title="Edit" aria-label={`Edit ${c.name}`} onClick={() => onEdit(c)}><Pencil size={15} /></button>
+            {isAdmin && <button style={iconBtn} title="Delete" aria-label={`Delete ${c.name}`} onClick={() => onDelete(c.id)}><Trash2 size={15} /></button>}
           </div>
         );
       })}

@@ -73,6 +73,7 @@ create table if not exists deliverables (
   quantity integer default 1,
   due_date date,
   notes text default '',
+  month text default '',                   -- 'YYYY-MM' the deliverable is attributed to (scope matching)
   created_at timestamptz default now()
 );
 
@@ -121,6 +122,17 @@ create table if not exists client_retainers (
   quantity integer default 0,
   created_at timestamptz default now(),
   unique (client_id, type)
+);
+
+-- Team roster: assignees are real records. clients.team_member and
+-- tasks.assignee still store the member NAME; this table populates the
+-- assignee dropdowns and the Team page.
+create table if not exists team_members (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  role text default '',
+  email text default '',
+  created_at timestamptz default now()
 );
 
 -- ============================================================

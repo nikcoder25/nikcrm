@@ -1,15 +1,17 @@
 // Retainer / scope logic. Compares a client's agreed monthly scope (included
 // quantity per deliverable type) against what was actually delivered in a month.
 //
-// A deliverable counts toward month M when it's marked Delivered AND its due_date
-// falls in M. (Due dates drive the monthly attribution — deliverables without a
-// due date aren't counted toward a specific month.)
+// A deliverable counts toward month M when it's marked Delivered AND it's
+// attributed to M. Attribution uses the explicit `month` field, falling back to
+// the due_date's month for legacy rows written before that column existed.
 
-const inMonth = (dateStr, month) => Boolean(dateStr) && String(dateStr).slice(0, 7) === month;
+// The calendar month ('YYYY-MM') a deliverable belongs to.
+export const deliverableMonth = (d) =>
+  d.month || (d.due_date ? String(d.due_date).slice(0, 7) : "");
 
 export function deliveredCount(deliverables, clientId, type, month) {
   return deliverables.filter(
-    (d) => d.client_id === clientId && d.type === type && d.status === "delivered" && inMonth(d.due_date, month)
+    (d) => d.client_id === clientId && d.type === type && d.status === "delivered" && deliverableMonth(d) === month
   ).length;
 }
 

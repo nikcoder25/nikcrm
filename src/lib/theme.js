@@ -23,15 +23,28 @@ export const modal = { background: "#fff", borderRadius: 18, padding: 26, width:
 export const globalCss = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&family=Archivo+Black&display=swap');
   * { margin: 0; box-sizing: border-box; }
+  h1, h2, h3, h4 { margin: 0; font-weight: inherit; }
   ::placeholder { color: #a39db5; }
   input:focus, select:focus, textarea:focus { outline: none; border-color: ${accent}; }
+  button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 3px solid ${accent}; outline-offset: 2px; }
   .spin { animation: rot .8s linear infinite; }
   @keyframes rot { to { transform: rotate(360deg); } }
-  @media (max-width: 720px) {
-    .shell { flex-direction: column; }
-    .side { width: 100% !important; height: auto !important; position: static !important; flex-direction: row !important; align-items: center; overflow-x: auto; border-right: none !important; border-bottom: ${BD} !important; }
-    .nav { flex-direction: row !important; }
-    .ni span { display: none; }
+  .kpi-click { transition: transform .08s ease, box-shadow .08s ease; }
+  .kpi-click:hover { transform: translate(-1px,-1px); box-shadow: 7px 7px 0 ${ink}; }
+
+  /* Mobile top bar + slide-in sidebar drawer. Hidden on desktop. */
+  .mobbar { display: none; }
+  .side-backdrop { display: none; }
+  @media (max-width: 900px) {
+    .mobbar { display: flex !important; }
+    .side {
+      position: fixed !important; left: 0; top: 0; height: 100vh !important; width: 260px !important;
+      z-index: 130; transform: translateX(-100%); transition: transform .2s ease;
+    }
+    .side.open { transform: translateX(0); box-shadow: 8px 0 0 rgba(0,0,0,.35); }
+    .side-backdrop.show { display: block; position: fixed; inset: 0; background: rgba(23,22,28,.5); z-index: 120; }
+  }
+  @media (max-width: 760px) {
     .board { grid-template-columns: 1fr !important; }
   }
   .print-only { display: none; }

@@ -119,6 +119,23 @@ async function ensureSchema(sql) {
     created_at timestamptz default now(),
     unique (client_id, type)
   )`;
+  // Team roster: assignees are now real records. clients.team_member and
+  // tasks.assignee still store the member NAME (keeps existing data valid and
+  // avoids a risky id migration); the roster just populates the dropdowns.
+  await sql`create table if not exists team_members (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    role text default '',
+    email text default '',
+    created_at timestamptz default now()
+  )`;
+  // Deliverables are attributed to a calendar month so they can be matched to
+  // the retainer scope by type + month. Older rows may predate this column.
+  await sql`alter table deliverables add column if not exists month text default ''`;
+  // Backfill month from an existing due_date so legacy delivered items still
+  // count toward their month's scope instead of silently dropping out.
+  await sql`update deliverables set month = substring(due_date::text from 1 for 7)
+    where (month is null or month = '') and due_date is not null`;
   // Postgres does NOT auto-index foreign-key columns. Without these, every
   // per-client lookup and every ON DELETE CASCADE does a full table scan,
   // which degrades linearly as the client count grows. Idempotent, so they
@@ -228,7 +245,7 @@ export default async (req) => {
     await ensureSchema(sql);
     switch (action) {
       case "load": {
-        const [clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers] = await Promise.all([
+        const [clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, team_members] = await Promise.all([
           sql`select * from clients order by created_at desc`,
           sql`select * from tasks order by created_at desc`,
           sql`select * from payments`,
@@ -239,8 +256,9 @@ export default async (req) => {
           sql`select id, keyword_id, rank, recorded_at from keyword_history order by recorded_at asc`,
           sql`select id, client_id, period, summary, updated_at from client_reports`,
           sql`select id, client_id, type, quantity from client_retainers`,
+          sql`select id, name, role, email from team_members order by name asc`,
         ]);
-        return json({ clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers });
+        return json({ clients, tasks, payments, resources, deliverables, keywords, keyword_history, client_reports, client_retainers, team_members });
       }
 
       case "clientSave": {
@@ -254,12 +272,23 @@ export default async (req) => {
             risk=${c.risk || "low"}, notes=${c.notes || ""}
             where id=${c.id}`;
         } else {
-          await sql`insert into clients
+          const created = await sql`insert into clients
             (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes, created_by)
             values (${c.name}, ${c.niche || ""}, ${c.status || "active"}, ${c.source || "Direct"},
                     ${c.package || "Standard"}, ${Number(c.fee) || 0}, ${c.team_member || ""},
                     ${c.start_month || ""}, ${c.renewal_month || ""}, ${c.risk || "low"},
-                    ${c.notes || ""}, ${c.created_by || ""})`;
+                    ${c.notes || ""}, ${c.created_by || ""})
+            returning id`;
+          // A new client with a monthly fee gets a pending payment row for the
+          // current month right away, so Revenue reflects money that's owed
+          // without waiting for someone to open the Revenue tab.
+          const fee = Number(c.fee) || 0;
+          if (created.length && fee > 0) {
+            const month = new Date().toISOString().slice(0, 7);
+            await sql`insert into payments (client_id, month, amount, status)
+              values (${created[0].id}, ${month}, ${fee}, 'pending')
+              on conflict (client_id, month) do nothing`;
+          }
         }
         return json({ ok: true });
       }
@@ -287,6 +316,11 @@ export default async (req) => {
 
       case "taskMove": {
         await sql`update tasks set status=${payload.status} where id=${payload.id}`;
+        return json({ ok: true });
+      }
+
+      case "taskAssign": {
+        await sql`update tasks set assignee=${payload.assignee || ""} where id=${payload.id}`;
         return json({ ok: true });
       }
 
@@ -344,18 +378,23 @@ export default async (req) => {
       case "deliverableCreate": {
         const d = payload;
         if (!d.client_id) return json({ error: "Pick a client for the deliverable." }, 400);
-        await sql`insert into deliverables (client_id, title, type, status, quantity, due_date, notes)
+        // Fall back to the due-date month, then the current month, so every
+        // deliverable is attributable to a month for scope matching.
+        const month = d.month || (d.due_date ? String(d.due_date).slice(0, 7) : new Date().toISOString().slice(0, 7));
+        await sql`insert into deliverables (client_id, title, type, status, quantity, due_date, notes, month)
           values (${d.client_id}, ${d.title || ""}, ${d.type || "other"}, ${d.status || "planned"},
-                  ${Number(d.quantity) || 1}, ${d.due_date || null}, ${d.notes || ""})`;
+                  ${Number(d.quantity) || 1}, ${d.due_date || null}, ${d.notes || ""}, ${month})`;
         return json({ ok: true });
       }
 
       case "deliverableUpdate": {
         const d = payload;
         if (!d.id) return json({ error: "Missing deliverable id." }, 400);
+        const month = d.month || (d.due_date ? String(d.due_date).slice(0, 7) : "");
         await sql`update deliverables set
           title=${d.title || ""}, type=${d.type || "other"}, status=${d.status || "planned"},
-          quantity=${Number(d.quantity) || 1}, due_date=${d.due_date || null}, notes=${d.notes || ""}
+          quantity=${Number(d.quantity) || 1}, due_date=${d.due_date || null}, notes=${d.notes || ""},
+          month=${month}
           where id=${d.id}`;
         return json({ ok: true });
       }
@@ -440,6 +479,31 @@ export default async (req) => {
       case "retainerDelete": {
         // Not admin-gated — only client deletion is.
         await sql`delete from client_retainers where id=${payload.id}`;
+        return json({ ok: true });
+      }
+
+      case "teamAdd": {
+        const m = payload;
+        if (!m.name || !m.name.trim()) return json({ error: "A team member name is required." }, 400);
+        await sql`insert into team_members (name, role, email)
+          values (${m.name.trim()}, ${m.role || ""}, ${m.email || ""})`;
+        return json({ ok: true });
+      }
+
+      case "teamUpdate": {
+        const m = payload;
+        if (!m.id) return json({ error: "Missing team member id." }, 400);
+        if (!m.name || !m.name.trim()) return json({ error: "A team member name is required." }, 400);
+        await sql`update team_members set
+          name=${m.name.trim()}, role=${m.role || ""}, email=${m.email || ""}
+          where id=${m.id}`;
+        return json({ ok: true });
+      }
+
+      case "teamDelete": {
+        // Not admin-gated — only client deletion is. Removing a member from the
+        // roster does NOT unassign anyone: clients/tasks keep the stored name.
+        await sql`delete from team_members where id=${payload.id}`;
         return json({ ok: true });
       }
 

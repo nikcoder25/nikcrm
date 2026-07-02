@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from "react";
-import { Plus, Pencil, Trash2, X, ArrowUp, ArrowDown, Minus, ExternalLink, Search, Target, Download } from "lucide-react";
-import { ink, accent, tint, disp, BD, BDt, btn, iconBtn, sel, overlay, modal, lbl, input } from "../lib/theme";
+import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Minus, Search, Target, Download, Loader } from "lucide-react";
+import { ink, accent, tint, disp, BD, BDt, btn, iconBtn, sel, lbl, input } from "../lib/theme";
 import { downloadCsv, keywordsCsv } from "../lib/csv";
-import { Panel, Empty, Field, Row, RevCard } from "./ui";
+import { useToast } from "../lib/toast";
+import { Panel, Empty, Field, Row, RevCard, Modal } from "./ui";
 
 // Movement vs the previous recorded rank. Lower rank number is better, so a
 // smaller current_rank than previous means the keyword improved (moved up).
@@ -39,7 +40,7 @@ function RankChart({ points, width = 104, height = 28, dots = false }) {
   const improved = pts[pts.length - 1] <= pts[0]; // rank went down or equal = improved/steady
   const color = improved ? "#1f9d57" : "#c0392b";
   return (
-    <svg width={width} height={height} style={{ display: "block", overflow: "visible" }}>
+    <svg width={width} height={height} style={{ display: "block", overflow: "visible" }} role="img" aria-label="Rank trend">
       <path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
       {dots && pts.map((r, i) => <circle key={i} cx={x(i)} cy={y(r)} r="3" fill={color} />)}
       {!dots && <circle cx={x(pts.length - 1)} cy={y(pts[pts.length - 1])} r="2.5" fill={color} />}
@@ -50,32 +51,26 @@ function RankChart({ points, width = 104, height = 28, dots = false }) {
 function KeywordHistoryModal({ keyword, points, onClose }) {
   const pts = points.filter((p) => p.rank != null);
   return (
-    <div style={overlay} onClick={(e) => { e.stopPropagation(); onClose(); }}>
-      <div style={{ ...modal, maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: disp, fontSize: 18, marginBottom: 4 }}>
-          <span>Rank history</span>
-          <button style={iconBtn} onClick={onClose}><X size={18} /></button>
-        </div>
-        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#4b4560", marginBottom: 14 }}>{keyword.keyword}</div>
-        {pts.length < 2 ? (
-          <Empty>Not enough history yet — change this keyword's rank a couple of times to build the chart.</Empty>
-        ) : (
-          <>
-            <div style={{ border: BDt, borderRadius: 12, padding: 16, background: "#faf8f2", marginBottom: 14 }}>
-              <RankChart points={pts} width={496} height={170} dots />
-            </div>
-            <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
-              {[...pts].reverse().map((p, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 14px", borderBottom: "1px solid #f0ece2", fontSize: 13, fontWeight: 700 }}>
-                  <span style={{ color: "#6b6580" }}>{String(p.recorded_at).slice(0, 10)}</span>
-                  <span>#{p.rank}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+    <Modal title="Rank history" onClose={onClose} maxWidth={560}>
+      <div style={{ fontSize: 13.5, fontWeight: 700, color: "#4b4560", marginBottom: 14 }}>{keyword.keyword}</div>
+      {pts.length < 2 ? (
+        <Empty>Not enough history yet — change this keyword's rank a couple of times to build the chart.</Empty>
+      ) : (
+        <>
+          <div style={{ border: BDt, borderRadius: 12, padding: 16, background: "#faf8f2", marginBottom: 14 }}>
+            <RankChart points={pts} width={496} height={170} dots />
+          </div>
+          <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
+            {[...pts].reverse().map((p, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 14px", borderBottom: "1px solid #f0ece2", fontSize: 13, fontWeight: 700 }}>
+                <span style={{ color: "#6b6580" }}>{String(p.recorded_at).slice(0, 10)}</span>
+                <span>#{p.rank}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -106,10 +101,10 @@ export function KeywordRows({ keywords, history = [], onEdit, onDelete }) {
             <span style={{ fontSize: 14, fontWeight: 900, fontFamily: disp, minWidth: 42, textAlign: "right" }}>{rankLabel(k.current_rank)}</span>
             <MoveChip kw={k} />
             {hasChart
-              ? <button title="Rank history" onClick={() => setHistKw(k)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", width: 104 }}><RankChart points={pts} /></button>
+              ? <button title="Rank history" aria-label={`Rank history for ${k.keyword || "keyword"}`} onClick={() => setHistKw(k)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", width: 104 }}><RankChart points={pts} /></button>
               : <span style={{ width: 104, fontSize: 11, color: "#a39db5", fontWeight: 700, textAlign: "center" }}>—</span>}
-            <button style={iconBtn} title="Edit" onClick={() => onEdit(k)}><Pencil size={15} /></button>
-            <button style={iconBtn} title="Delete" onClick={() => onDelete(k.id)}><Trash2 size={15} /></button>
+            <button style={iconBtn} title="Edit" aria-label={`Edit ${k.keyword || "keyword"}`} onClick={() => onEdit(k)}><Pencil size={15} /></button>
+            <button style={iconBtn} title="Delete" aria-label={`Delete ${k.keyword || "keyword"}`} onClick={() => onDelete(k.id)}><Trash2 size={15} /></button>
           </div>
         );
       })}
@@ -123,40 +118,56 @@ export function KeywordForm({ clients, initial, preClient, onClose, onSave }) {
   const [f, setF] = useState(initial || {
     client_id: preClient || "", keyword: "", current_rank: "", target_url: "", notes: "",
   });
+  const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
-  const submit = () => {
-    if (!f.client_id || !f.keyword.trim()) return;
-    onSave({ ...f, current_rank: f.current_rank === "" ? null : f.current_rank });
-  };
   const lockClient = Boolean(preClient) && !initial;
+
+  const submit = async () => {
+    if (busy) return;
+    const errs = {};
+    if (!f.client_id) errs.client_id = "Pick a client.";
+    if (!f.keyword.trim()) errs.keyword = "Keyword is required.";
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
+    setBusy(true);
+    try {
+      await onSave({ ...f, current_rank: f.current_rank === "" ? null : f.current_rank });
+      toast(initial ? "Keyword updated" : "Keyword added");
+      onClose();
+    } catch (e) {
+      toast(e?.message || "Could not save keyword.", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div style={overlay} onClick={onClose}>
-      <div style={modal} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: disp, fontSize: 19, textTransform: "uppercase", marginBottom: 8 }}>
-          <span>{initial ? "Edit keyword" : "Add keyword"}</span>
-          <button style={iconBtn} onClick={onClose}><X size={18} /></button>
+    <Modal title={initial ? "Edit keyword" : "Add keyword"} onClose={onClose}>
+      {!lockClient && (
+        <div>
+          <label style={lbl} htmlFor="kw-client">Client <span aria-hidden="true" style={{ color: "#c0392b" }}>*</span></label>
+          <select id="kw-client" style={{ ...input, ...(errors.client_id ? { borderColor: "#c0392b" } : null) }} value={f.client_id} onChange={(e) => set("client_id", e.target.value)} aria-required="true" aria-invalid={errors.client_id ? true : undefined}>
+            <option value="">Select a client…</option>
+            {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          {errors.client_id && <div style={{ color: "#c0392b", fontSize: 11.5, fontWeight: 700, marginTop: 4 }}>{errors.client_id}</div>}
         </div>
-        {!lockClient && (
-          <div><label style={lbl}>Client</label>
-            <select style={input} value={f.client_id} onChange={(e) => set("client_id", e.target.value)}>
-              <option value="">Select a client…</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-        )}
-        <Field label="Keyword" value={f.keyword} onChange={(v) => set("keyword", v)} placeholder="e.g. emergency ac repair austin" />
-        <Row>
-          <Field label="Current rank" value={f.current_rank ?? ""} onChange={(v) => set("current_rank", v)} type="number" placeholder="e.g. 7 (blank = untracked)" />
-          <Field label="Target URL" value={f.target_url} onChange={(v) => set("target_url", v)} placeholder="https://…" />
-        </Row>
-        <label style={lbl}>Notes</label>
-        <textarea style={{ ...input, minHeight: 56, resize: "vertical" }} value={f.notes || ""} onChange={(e) => set("notes", e.target.value)} placeholder="Anything worth noting…" />
-        {initial && <p style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 600, marginTop: 10 }}>Changing the rank rolls the old value into “previous” so movement stays accurate.</p>}
-        <button style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 18, justifyContent: "center" }} onClick={submit}>
-          {initial ? "Save changes" : "Add keyword"}
-        </button>
-      </div>
-    </div>
+      )}
+      <Field label="Keyword" value={f.keyword} onChange={(v) => set("keyword", v)} placeholder="e.g. emergency ac repair austin" required error={errors.keyword} />
+      <Row>
+        <Field label="Current rank" value={f.current_rank ?? ""} onChange={(v) => set("current_rank", v)} type="number" placeholder="e.g. 7 (blank = untracked)" />
+        <Field label="Target URL" value={f.target_url} onChange={(v) => set("target_url", v)} placeholder="https://…" />
+      </Row>
+      <label style={lbl} htmlFor="kw-notes">Notes</label>
+      <textarea id="kw-notes" style={{ ...input, minHeight: 56, resize: "vertical" }} value={f.notes || ""} onChange={(e) => set("notes", e.target.value)} placeholder="Anything worth noting…" />
+      {initial && <p style={{ fontSize: 11.5, color: "#6b6580", fontWeight: 600, marginTop: 10 }}>Changing the rank rolls the old value into “previous” so movement stays accurate.</p>}
+      <button style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 18, justifyContent: "center", opacity: busy ? 0.7 : 1 }} onClick={submit} disabled={busy}>
+        {busy ? <Loader size={16} className="spin" /> : null}
+        {busy ? "Saving…" : initial ? "Save changes" : "Add keyword"}
+      </button>
+    </Modal>
   );
 }
 
@@ -169,7 +180,7 @@ export function keywordSummary(keywords) {
 }
 
 /* ---------------- Keywords tab ---------------- */
-export default function Keywords({ clients, keywords, history = [], onCreate, onUpdate, onDelete }) {
+export default function Keywords({ clients, keywords, history = [], onSave, onDelete }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [preClient, setPreClient] = useState("");
@@ -186,6 +197,8 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
     .map((c) => ({ client: c, items: keywords.filter((k) => k.client_id === c.id) }))
     .filter((g) => g.items.length > 0);
 
+  const addBtn = <button style={btn(accent, "#fff")} disabled={clients.length === 0} onClick={() => openAdd(filterClient)}><Plus size={16} /> Add keyword</button>;
+
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 16, marginBottom: 18 }}>
@@ -195,19 +208,19 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
-        <select style={{ ...sel, flex: "none", minWidth: 170 }} value={filterClient} onChange={(e) => setFilterClient(e.target.value)}>
+        <select style={{ ...sel, flex: "none", minWidth: 170 }} value={filterClient} onChange={(e) => setFilterClient(e.target.value)} aria-label="Filter by client">
           <option value="">All clients</option>
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <span style={{ flex: 1 }} />
         <button style={btn("#fff", ink)} disabled={visibleKeywords.length === 0} onClick={() => downloadCsv("keywords.csv", keywordsCsv(visibleKeywords, clients))}><Download size={15} /> Export CSV</button>
-        <button style={btn(accent, "#fff")} disabled={clients.length === 0} onClick={() => openAdd(filterClient)}><Plus size={16} /> Add keyword</button>
+        {addBtn}
       </div>
 
       {clients.length === 0 ? (
         <Panel><Empty>Add a client first, then you can track their keyword ranks.</Empty></Panel>
       ) : groups.length === 0 ? (
-        <Panel><Empty>No keywords yet. Tap "Add keyword" to start tracking ranks.</Empty></Panel>
+        <Panel><Empty action={addBtn}>No keywords yet. Start tracking ranks.</Empty></Panel>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           {groups.map(({ client, items }) => {
@@ -215,11 +228,11 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
             return (
               <Panel key={client.id}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 20px", borderBottom: BD, flexWrap: "wrap" }}>
-                  <div style={{ fontFamily: disp, fontSize: 16, flex: 1, minWidth: 0 }}>{client.name}</div>
+                  <h2 style={{ fontFamily: disp, fontSize: 16, flex: 1, minWidth: 0 }}>{client.name}</h2>
                   <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>
                     avg {gs.avg == null ? "—" : `#${gs.avg}`} · {gs.top10} in top 10
                   </span>
-                  <button style={iconBtn} title="Add for this client" onClick={() => openAdd(client.id)}><Plus size={15} /></button>
+                  <button style={iconBtn} title="Add for this client" aria-label={`Add keyword for ${client.name}`} onClick={() => openAdd(client.id)}><Plus size={15} /></button>
                 </div>
                 <KeywordRows keywords={items} history={history} onEdit={openEdit} onDelete={onDelete} />
               </Panel>
@@ -229,13 +242,7 @@ export default function Keywords({ clients, keywords, history = [], onCreate, on
       )}
 
       {showForm && (
-        <KeywordForm
-          clients={clients}
-          initial={editing}
-          preClient={preClient}
-          onClose={close}
-          onSave={(k) => { (k.id ? onUpdate(k) : onCreate(k)); close(); }}
-        />
+        <KeywordForm clients={clients} initial={editing} preClient={preClient} onClose={close} onSave={onSave} />
       )}
     </div>
   );
