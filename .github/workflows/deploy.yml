@@ -35,7 +35,7 @@ jobs:
         run: npm ci
       - name: wrangler deploy
         if: env.CLOUDFLARE_API_TOKEN != ''
-        run: curl -sS -X PUT https://api.cloudflare.com/client/v4/accounts/91c0b006028d85054d2c432c86b63fa3/workers/subdomain --oauth2-bearer $CLOUDFLARE_API_TOKEN -H Content-Type:application/json --data {\"subdomain\":\"growth-atlas-nik\"} || true; npx wrangler deploy      - name: Skipped (no CLOUDFLARE_API_TOKEN secret)
+        run: 'curl -sS -X PUT https://api.cloudflare.com/client/v4/accounts/91c0b006028d85054d2c432c86b63fa3/workers/subdomain --oauth2-bearer $CLOUDFLARE_API_TOKEN -H Content-Type:application/json --data {\"subdomain\":\"growth-atlas-nik\"} || true; npx wrangler deploy'
       - name: Skipped (no CLOUDFLARE_API_TOKEN secret)
         if: env.CLOUDFLARE_API_TOKEN == ''
         run: echo "Add the CLOUDFLARE_API_TOKEN repo secret to enable API deploys."
