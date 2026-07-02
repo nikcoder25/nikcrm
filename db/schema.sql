@@ -21,6 +21,7 @@ create table if not exists clients (
   renewal_month text default '',
   risk text default 'low',
   notes text default '',
+  email text default '',                  -- contact email (used to match Gmail messages)
   created_by text default '',
   created_at timestamptz default now()
 );
@@ -264,6 +265,30 @@ create table if not exists activities (
   author text default '',
   happened_at timestamptz default now(),
   follow_up_date date,                      -- optional "next touch" reminder; null once done
+  google_event_id text default '',          -- Google Calendar event id (once pushed)
+  gmail_msg_id text default '',             -- source Gmail message id (for imported emails; dedupe)
+  created_at timestamptz default now()
+);
+
+-- Third-party integrations. One row per provider (currently just 'google'),
+-- holding the workspace-level OAuth tokens. Never exposed to the browser.
+create table if not exists integrations (
+  provider text primary key,               -- 'google'
+  access_token text default '',
+  refresh_token text default '',
+  token_expiry timestamptz,
+  scope text default '',
+  account_email text default '',           -- the connected Google account
+  connected_by text default '',
+  updated_at timestamptz default now()
+);
+
+-- Short-lived OAuth state nonces: created by the (password-gated) authUrl action
+-- and consumed once by the OAuth callback, so only an authenticated admin can
+-- have initiated a connect.
+create table if not exists oauth_states (
+  state text primary key,
+  created_by text default '',
   created_at timestamptz default now()
 );
 
@@ -286,3 +311,4 @@ create index if not exists idx_ai_citation_history_cit on ai_citation_history (c
 create index if not exists idx_activity_time on activity (created_at desc);
 create index if not exists idx_activities_client on activities (client_id);
 create index if not exists idx_activities_time on activities (happened_at);
+create index if not exists idx_activities_gmail on activities (gmail_msg_id);

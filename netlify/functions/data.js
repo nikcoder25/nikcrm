@@ -273,6 +273,11 @@ async function ensureSchema(sql) {
     detail text default '',
     created_at timestamptz default now()
   )`;
+  // Google integration columns: a client contact email (for Gmail matching),
+  // the pushed Calendar event id, and the source Gmail message id (dedupe).
+  await sql`alter table clients add column if not exists email text default ''`;
+  await sql`alter table activities add column if not exists google_event_id text default ''`;
+  await sql`alter table activities add column if not exists gmail_msg_id text default ''`;
   // Postgres does NOT auto-index foreign-key columns. Without these, every
   // per-client lookup and every ON DELETE CASCADE does a full table scan,
   // which degrades linearly as the client count grows. Idempotent, so they
@@ -293,6 +298,7 @@ async function ensureSchema(sql) {
     sql`create index if not exists idx_activity_time on activity (created_at desc)`,
     sql`create index if not exists idx_activities_client on activities (client_id)`,
     sql`create index if not exists idx_activities_time on activities (happened_at)`,
+    sql`create index if not exists idx_activities_gmail on activities (gmail_msg_id)`,
   ]);
   schemaReady = true;
 }
@@ -326,7 +332,7 @@ const DATASET_QUERIES = {
     from activity order by created_at desc limit 100`,
   // Client touchpoint timeline (notes / calls / emails / meetings) — distinct
   // from the `activity` audit trail above.
-  activities: (sql) => sql`select id, client_id, type, body, author, happened_at, follow_up_date
+  activities: (sql) => sql`select id, client_id, type, body, author, happened_at, follow_up_date, google_event_id, gmail_msg_id
     from activities order by happened_at desc`,
 };
 
@@ -772,16 +778,16 @@ export default async (req) => {
             source=${c.source || "Direct"}, package=${c.package || "Standard"},
             fee=${Number(c.fee) || 0}, team_member=${c.team_member || ""},
             start_month=${c.start_month || ""}, renewal_month=${c.renewal_month || ""},
-            risk=${c.risk || "low"}, notes=${c.notes || ""}, gsc_property=${gscProperty}
+            risk=${c.risk || "low"}, notes=${c.notes || ""}, gsc_property=${gscProperty}, email=${c.email || ""}
             where id=${c.id}`;
           await logActivity(sql, { actor, verb: "updated client", entity: "client", entity_label: c.name, client_id: c.id });
         } else {
           const ins = await sql`insert into clients
-            (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes, gsc_property, created_by)
+            (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes, gsc_property, email, created_by)
             values (${c.name}, ${c.niche || ""}, ${c.status || "active"}, ${c.source || "Direct"},
                     ${c.package || "Standard"}, ${Number(c.fee) || 0}, ${c.team_member || ""},
                     ${c.start_month || ""}, ${c.renewal_month || ""}, ${c.risk || "low"},
-                    ${c.notes || ""}, ${gscProperty}, ${auth.name || c.created_by || ""}) returning id`;
+                    ${c.notes || ""}, ${gscProperty}, ${c.email || ""}, ${auth.name || c.created_by || ""}) returning id`;
           // A new client with a monthly fee gets a pending payment row for the
           // current month right away, so Revenue reflects money that's owed
           // without waiting for someone to open the Revenue tab.

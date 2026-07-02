@@ -13,7 +13,7 @@ export function signOut() { localStorage.removeItem(KEY); }
 // Bearer header); sessions saved before the token rollout only have the shared
 // password, so keep sending the legacy header until the next login — nobody
 // gets force-signed-out by the upgrade.
-function authHeaders() {
+export function authHeaders() {
   const s = getSession();
   if (s?.token) return { authorization: `Bearer ${s.token}` };
   if (s?.password) return { "x-app-password": s.password };

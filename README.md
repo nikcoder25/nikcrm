@@ -24,6 +24,7 @@ Built with **React + Vite** on the front end and **Netlify** end-to-end:
 - **Revenue**: MRR, collected vs pending per month, revenue by source, and a per-client payment tracker (Pending / Paid / Overdue). Optional **Stripe payment links**: with `STRIPE_SECRET_KEY` set, every unpaid row gets a "Payment link" button that creates (once) and copies a Stripe Payment Link for that client's monthly fee — and a webhook (`/api/stripe-webhook`) marks the payment **Paid automatically** when the client pays. Without the key the buttons simply don't appear
 - **Monthly Report**: inside each client's detail view, generate a printable monthly snapshot — keyword rankings (current/previous/movement, top-10, avg, net improvement), an **Organic search** section when Search Console is linked (month totals vs previous month + top 10 queries), link building, AI visibility, deliverables with a delivered/total rollup, scope-delivered, and a saved free-text "wins" narrative. **Print / Export** opens a clean print-friendly layout (Save as PDF). A scheduled function (`netlify/functions/monthly-report-email.mjs`, 08:00 UTC on the 1st) **emails each opted-in client their report** for the month that just ended — set `RESEND_API_KEY` and a recipient per client in the detail view
 - **Google Search Console integration** *(optional)*: link each client to their Search Console property (`sc-domain:example.com` or `https://example.com/`) and a scheduled function (`netlify/functions/gsc-sync.mjs`, 05:30 UTC) pulls their organic performance nightly via one agency-wide **Google service account** (`GSC_SERVICE_ACCOUNT_JSON` env var). The client detail view gets an **"Organic search"** panel — clicks + impressions for the last 28 days with change vs the previous 28, a daily-clicks chart, and a top-queries table — and feeds the Monthly Report's Organic search section. Without the env var everything stays hidden and manual
+- **Google integration (Gmail + Calendar)** *(optional)*: connect one workspace **Google account** in Settings to sync two ways — **pull** recent Gmail messages to/from a client's contact address into their activity timeline, and **push** a follow-up or meeting straight to **Google Calendar**. Requires a one-time Google Cloud OAuth setup (see [Google integration](#google-integration-gmail--calendar--optional))
 - **Client portal**: give each client a private, read-only share link (`/portal/<token>`, no login) showing their keyword rankings with movement and rank-over-time charts, the month's deliverables, retainer scope progress and the saved monthly narrative — and nothing internal (no fees, notes or team data). Create, copy, disable/enable or regenerate the link from the client's detail view; regenerating or disabling revokes the old link instantly. Set the optional `AGENCY_NAME` env var to white-label the portal branding (defaults to "Growth Atlas"). The same panel also sets the **monthly report email** recipient used by the scheduled report emailer
 - **Activity** log: a team-wide audit trail — who created/edited/deleted clients, tasks, keywords, deliverables, payments and more, with relative timestamps. Full feed in its own tab, plus a "Recent changes" panel on the Overview (distinct from the client touchpoint timeline above)
 - **Team**: a workload view (who has how many clients and tasks) plus login management. Everyone logs in with one shared password (set an optional second password for admins), and admins can add optional **per-user accounts** (email + personal password) from the Team tab — see [Per-user accounts](#per-user-accounts). **Roles**: admins can delete clients and manage user accounts; everyone else can do everything else
@@ -57,6 +58,36 @@ Everything else (Stripe billing, Search Console, automatic rank checks, report/d
 - Open it, enter your name and the team password, and you're in.
 
 > Tip: any time you change an environment variable, trigger a fresh deploy so it takes effect.
+
+---
+
+## Google integration (Gmail + Calendar) — optional
+
+The app is fully functional without this. Set it up when you want to pull client emails into the timeline and push follow-ups/meetings to Google Calendar. One Google account is connected for the **whole workspace** (typically the agency's), by an admin, and its tokens are stored server-side in the database — never sent to the browser.
+
+**1. Create an OAuth client in Google Cloud**
+- In the [Google Cloud Console](https://console.cloud.google.com/): create (or pick) a project.
+- **APIs & Services → Enabled APIs & services → + Enable APIs** — enable the **Gmail API** and the **Google Calendar API**.
+- **APIs & Services → OAuth consent screen** — configure it (External is fine), and add these scopes: `.../auth/gmail.readonly`, `.../auth/calendar.events`, `.../auth/userinfo.email`. While the app is in "Testing", add the Google accounts that will connect as **Test users**.
+- **APIs & Services → Credentials → + Create credentials → OAuth client ID → Web application.**
+  - **Authorized redirect URIs**: add `https://YOUR-SITE/api/google` (your production URL). If you'll connect from Netlify **deploy previews** too, add those origins as well — the redirect URI must match exactly.
+- Copy the **Client ID** and **Client secret**.
+
+**2. Set the environment variables on Netlify**
+- **Project configuration → Environment variables** (scope to Builds + Functions + Runtime):
+  - `GOOGLE_CLIENT_ID` — the OAuth client ID.
+  - `GOOGLE_CLIENT_SECRET` — the OAuth client secret.
+  - `GOOGLE_REDIRECT_URI` — *(optional)* only if you want to pin the redirect; otherwise it defaults to `<your-site-origin>/api/google`. If you set it, it must match an Authorized redirect URI exactly.
+- Trigger a fresh deploy so the function picks them up.
+
+**3. Connect**
+- Open the app → **Settings** → **Connect Google** (admin only) → pick the account and approve the scopes. You'll be redirected back and the status flips to **Connected**.
+- Then on any client page: set the client's **Contact email** (in the client form) to enable **Sync Gmail**, and use **Add to Google Calendar** on any follow-up or meeting.
+
+**Notes & limits**
+- Gmail access is **read-only**; Calendar access is limited to **events** the app creates. Disconnecting (Settings → Disconnect) deletes the stored tokens.
+- Gmail sync imports up to ~15 recent messages matching the contact email per run, de-duplicated by message id, and logs each as an **email** activity.
+- This is a workspace-wide (single Google account) integration, not per-team-member — appropriate for the shared-login model. For per-person Google accounts you'd extend it alongside a real auth provider.
 
 ---
 
@@ -143,6 +174,7 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
 │   │   └── auth.test.js    Unit tests for the auth helpers
 │   └── functions/
 │       ├── data.js         API: auth check + all DB reads/writes (Neon)
+│       ├── google.js       Google OAuth + Gmail/Calendar sync (/api/google)
 │       ├── rank-check.mjs  Scheduled daily DataForSEO rank checks (optional)
 │       ├── gsc-sync.mjs    Scheduled nightly Google Search Console pull (optional)
 │       ├── monthly-report-email.mjs  Scheduled monthly client report emails (optional)
@@ -165,6 +197,7 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
     │   ├── csv.js          CSV export builders + download
     │   ├── ics.js          iCalendar (.ics) export for follow-ups & meetings
     │   ├── health.js       Client health score (0–100) computation
+    │   ├── google.js       Client for /api/google (status, connect, sync)
     │   ├── router.js       Tiny history-based router (+ router.test.js)
     │   ├── scope.js        Retainer scope vs delivered logic (+ scope.test.js)
     │   └── theme.js        Colors, borders, shared style tokens, global CSS
@@ -188,6 +221,7 @@ Copy `.env.example` to `.env` to set `APP_PASSWORD` / `ADMIN_PASSWORD` for local
         ├── Portal.jsx          Public read-only client portal (/portal/:token)
         ├── ClientReport.jsx    Printable per-client monthly report + narrative
         ├── ClientScope.jsx     Retainer scope: included vs delivered per month
+        ├── Settings.jsx        Workspace settings: Google (Gmail/Calendar) connect
         └── ui.jsx              Small shared pieces (Field, Pick, Panel, RevCard...)
 ```
 
