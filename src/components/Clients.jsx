@@ -1,16 +1,27 @@
 import React, { useState, useMemo, useDeferredValue } from "react";
-import { Pencil, Trash2, ChevronRight, Download, Search, Plus } from "lucide-react";
+import { Pencil, Trash2, Download, Search, Plus } from "lucide-react";
 import { ink, accent, tint, btn, iconBtn, sel, input } from "../lib/theme";
 import { STATUSES, STATUS_LABEL } from "../lib/constants";
 import { downloadCsv, clientsCsv } from "../lib/csv";
 import { computeHealth } from "../lib/health";
+import { money, ymLabel } from "../lib/format";
 import { Panel, Empty, HealthBadge } from "./ui";
+
+const GRAY = "#6b6580";
+const MUTED = "#a39db5";
 
 // Bucket a list by client_id once, so per-row lookups are O(1).
 const groupBy = (rows) => {
   const m = new Map();
   for (const r of rows) { if (!m.has(r.client_id)) m.set(r.client_id, []); m.get(r.client_id).push(r); }
   return m;
+};
+
+// Risk pill colours mirror the spreadsheet's traffic-light feel.
+const RISK_STYLE = {
+  low: { background: "#d7f5df", color: "#1b7a3d" },
+  medium: { background: "#fdf0d5", color: "#8a5a0f" },
+  high: { background: "#f7dede", color: "#c0392b" },
 };
 
 /* ---------------- Clients ---------------- */
@@ -54,6 +65,10 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
     return m;
   }, [deliverables]);
 
+  const cell = { fontSize: 12.5, fontWeight: 700, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" };
+  const th = { fontSize: 10.5, fontWeight: 800, color: GRAY, textTransform: "uppercase", letterSpacing: "0.04em" };
+  const GRID = "minmax(150px,1.6fr) 96px 120px minmax(90px,1fr) 96px 90px 82px minmax(110px,1fr) 96px 96px 80px 108px 74px";
+
   return (
     <div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
@@ -90,38 +105,66 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
         </Empty></Panel>
       ) : filtered.length === 0 ? <Panel><Empty>No clients match your search.</Empty></Panel> : (
     <Panel>
-      {filtered.map((c) => {
-        const dels = delsByClient.get(c.id);
-        return (
-          <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "15px 20px", borderBottom: "2px solid #f0ece2" }}>
-            {/* Clicking the client opens the full detail view */}
-            <div
-              onClick={() => onOpen(c)}
-              style={{ flex: 1, minWidth: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
-              title="View details"
-            >
-              <ChevronRight size={16} style={{ color: accent, flexShrink: 0 }} />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 800, fontSize: 15 }}>{c.name}
-                  {c.source && <span style={{ fontSize: 10.5, fontWeight: 800, background: tint, color: ink, padding: "2px 9px", borderRadius: 6, marginLeft: 9, border: "2px solid " + ink }}>{c.source}</span>}
-                </div>
-                <div style={{ fontSize: 12.5, color: "#6b6580", marginTop: 3, fontWeight: 600 }}>
-                  {c.niche}{c.package ? ` · ${c.package}` : ""}{c.team_member ? ` · ${c.team_member}` : ""}{c.start_month ? ` · ${c.start_month}` : ""}
-                </div>
-              </div>
-            </div>
-            <HealthBadge health={healthByClient.get(c.id)} size="sm" />
-            {dels && dels.total > 0 && (
-              <span title="Deliverables delivered / total" style={{ fontSize: 11, fontWeight: 800, background: "#fff", color: ink, padding: "4px 10px", borderRadius: 7, border: "2px solid " + ink }}>
-                {dels.delivered}/{dels.total} delivered
-              </span>
-            )}
-            <span style={{ padding: "5px 12px", borderRadius: 7, fontSize: 11.5, fontWeight: 800, border: "2px solid " + ink, background: c.status === "active" ? accent : "#fff", color: c.status === "active" ? "#fff" : ink }}>{STATUS_LABEL[c.status] || c.status}</span>
-            <button style={iconBtn} title="Edit" aria-label={`Edit ${c.name}`} onClick={() => onEdit(c)}><Pencil size={15} /></button>
-            {isAdmin && <button style={iconBtn} title="Delete" aria-label={`Delete ${c.name}`} onClick={() => onDelete(c.id)}><Trash2 size={15} /></button>}
+      <div className="scroll-x">
+        <div style={{ minWidth: 1360 }}>
+          <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 10, alignItems: "center", padding: "12px 20px", borderBottom: "2px solid #f0ece2" }}>
+            <span style={th}>Name</span>
+            <span style={th}>Status</span>
+            <span style={th}>Health</span>
+            <span style={th}>Niche</span>
+            <span style={th}>Package</span>
+            <span style={th}>Source</span>
+            <span style={th}>Fee</span>
+            <span style={th}>Team</span>
+            <span style={th}>Start</span>
+            <span style={th}>Renewal</span>
+            <span style={th}>Risk</span>
+            <span style={th}>Deliverables</span>
+            <span />
           </div>
-        );
-      })}
+          {filtered.map((c) => {
+            const dels = delsByClient.get(c.id);
+            const risk = RISK_STYLE[c.risk];
+            return (
+              <div key={c.id} style={{ display: "grid", gridTemplateColumns: GRID, gap: 10, alignItems: "center", padding: "11px 20px", borderBottom: "1px solid #f0ece2" }}>
+                {/* Clicking the client opens the full detail view */}
+                <span
+                  onClick={() => onOpen(c)}
+                  style={{ ...cell, fontWeight: 800, cursor: "pointer" }}
+                  title={`${c.name} — view details`}
+                >
+                  {c.name}
+                </span>
+                <span style={{ padding: "4px 9px", borderRadius: 7, fontSize: 11, fontWeight: 800, textAlign: "center", border: "2px solid " + ink, background: c.status === "active" ? accent : "#fff", color: c.status === "active" ? "#fff" : ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={STATUS_LABEL[c.status] || c.status}>
+                  {STATUS_LABEL[c.status] || c.status}
+                </span>
+                <span><HealthBadge health={healthByClient.get(c.id)} size="sm" /></span>
+                <span style={{ ...cell, color: c.niche ? ink : MUTED }} title={c.niche}>{c.niche || "—"}</span>
+                <span style={{ ...cell, color: c.package ? GRAY : MUTED }} title={c.package}>{c.package || "—"}</span>
+                {c.source ? (
+                  <span style={{ fontSize: 10.5, fontWeight: 800, background: tint, color: ink, padding: "3px 9px", borderRadius: 6, border: "2px solid " + ink, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={c.source}>{c.source}</span>
+                ) : <span style={{ ...cell, color: MUTED }}>—</span>}
+                <span style={{ ...cell, color: Number(c.fee) > 0 ? ink : MUTED }}>{Number(c.fee) > 0 ? money(c.fee) : "—"}</span>
+                <span style={{ ...cell, color: c.team_member ? ink : MUTED }} title={c.team_member}>{c.team_member || "—"}</span>
+                <span style={{ ...cell, color: c.start_month ? GRAY : MUTED }}>{c.start_month ? ymLabel(c.start_month) : "—"}</span>
+                <span style={{ ...cell, color: c.renewal_month ? GRAY : MUTED }}>{c.renewal_month ? ymLabel(c.renewal_month) : "—"}</span>
+                {risk ? (
+                  <span style={{ ...risk, padding: "3px 9px", borderRadius: 6, fontSize: 11, fontWeight: 800, textAlign: "center", textTransform: "capitalize" }}>{c.risk}</span>
+                ) : <span style={{ ...cell, color: MUTED }}>—</span>}
+                {dels && dels.total > 0 ? (
+                  <span title="Deliverables delivered / total" style={{ fontSize: 11, fontWeight: 800, background: "#fff", color: ink, padding: "4px 9px", borderRadius: 7, border: "2px solid " + ink, textAlign: "center", whiteSpace: "nowrap" }}>
+                    {dels.delivered}/{dels.total}
+                  </span>
+                ) : <span style={{ ...cell, color: MUTED }}>—</span>}
+                <span style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
+                  <button style={{ ...iconBtn, padding: 5 }} title="Edit" aria-label={`Edit ${c.name}`} onClick={() => onEdit(c)}><Pencil size={13} /></button>
+                  {isAdmin && <button style={{ ...iconBtn, padding: 5 }} title="Delete" aria-label={`Delete ${c.name}`} onClick={() => onDelete(c.id)}><Trash2 size={13} /></button>}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </Panel>
       )}
     </div>
