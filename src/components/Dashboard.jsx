@@ -304,7 +304,11 @@ export default function Dashboard({ session, onSignOut }) {
         <nav className="nav" aria-label="Main navigation" style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
           {NAV.map((n) => {
             const I = n.i, on = tab === n.k && !detailId;
-            return <button key={n.k} className="ni" onClick={() => goTab(n.k)} aria-current={on ? "page" : undefined}
+            // Mouse clicks (e.detail > 0) drop focus so no ring can appear on
+            // the last-clicked item later (browsers upgrade lingering focus to
+            // :focus-visible on the next keystroke, e.g. ⌘K). Keyboard
+            // activation (e.detail === 0) keeps focus and its visible ring.
+            return <button key={n.k} className="ni" onClick={(e) => { if (e.detail) e.currentTarget.blur(); goTab(n.k); }} aria-current={on ? "page" : undefined}
               style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", borderRadius: 11, border: on ? BD : "3px solid transparent", background: on ? "#fff" : "transparent", color: on ? ink : "#c9bdf0", fontWeight: on ? 800 : 700, fontSize: 14.5, cursor: "pointer", textAlign: "left", boxShadow: on ? "4px 4px 0 rgba(0,0,0,.4)" : "none" }}>
               <I size={17} /> <span>{n.l}</span>
             </button>;

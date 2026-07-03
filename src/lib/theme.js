@@ -37,6 +37,13 @@ export const globalCss = `
   .kpi-click { transition: transform .08s ease, box-shadow .08s ease; }
   .kpi-click:hover { transform: translate(-1px,-1px); box-shadow: 7px 7px 0 ${ink}; }
 
+  /* Sidebar nav items (.ni): a focus ring only for KEYBOARD navigation, never
+     a lingering one after a mouse click. White, not the accent — the global
+     accent ring is nearly invisible on the dark purple rail. Same 3px/offset
+     geometry as the app-wide focus ring. */
+  .ni:focus { outline: none; }
+  .ni:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+
   /* Mobile top bar + slide-in sidebar drawer. Hidden on desktop. */
   .mobbar { display: none; }
   .side-backdrop { display: none; }
