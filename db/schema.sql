@@ -160,6 +160,7 @@ create table if not exists orders (
   person text default '',
   website text default '',
   order_data text default '',              -- what was ordered, e.g. "monthly seo"
+  price numeric default 0,                 -- project price; ADMIN-ONLY (never returned to non-admins)
   created_by text default '',
   created_at timestamptz default now()
 );

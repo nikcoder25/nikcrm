@@ -30,7 +30,7 @@ const json = (obj, status = 200) =>
 // once `clients` existed, so later ALTERs silently never reached live
 // databases. Deltas stay small on purpose — a migration run must fit inside
 // Cloudflare's per-invocation subrequest budget alongside the actual request.
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 async function runMigrations(sql, from) {
   if (from < 2) {
@@ -59,6 +59,11 @@ async function runMigrations(sql, from) {
       created_by text default '',
       created_at timestamptz default now()
     )`;
+  }
+  if (from < 4) {
+    // v4: per-order project price. Admin-only — the API never returns it to
+    // non-admins and only admins can set it (see load/orderCreate/orderUpdate).
+    await sql`alter table orders add column if not exists price numeric default 0`;
   }
   await sql`insert into schema_meta (id, version) values (1, ${SCHEMA_VERSION})
     on conflict (id) do update set version=${SCHEMA_VERSION}`;
@@ -407,6 +412,15 @@ const DATASET_QUERIES = {
 async function loadDatasets(sql, names) {
   const results = await Promise.all(names.map((n) => DATASET_QUERIES[n](sql)));
   return Object.fromEntries(names.map((n, i) => [n, results[i]]));
+}
+
+// The order project price is admin-only. Strip it from the payload for everyone
+// else so it never reaches a non-admin browser — the column is dropped, not
+// zeroed, so it can't be read off the wire either.
+function redactForRole(data, isAdmin) {
+  if (isAdmin || !Array.isArray(data.orders)) return data;
+  data.orders = data.orders.map(({ price: _price, ...rest }) => rest);
+  return data;
 }
 
 // Best-effort audit write — a logging failure must never fail the action itself.
@@ -836,7 +850,7 @@ export default async (req) => {
     await ensureSchema(sql);
     switch (action) {
       case "load": {
-        return json(await loadDatasets(sql, Object.keys(DATASET_QUERIES)));
+        return json(redactForRole(await loadDatasets(sql, Object.keys(DATASET_QUERIES)), isAdmin));
       }
 
       case "backupExport": {
@@ -892,7 +906,7 @@ export default async (req) => {
         if (!sets.length) return json({ error: "No datasets requested." }, 400);
         const unknown = sets.find((s) => !Object.hasOwn(DATASET_QUERIES, s));
         if (unknown !== undefined) return json({ error: `Unknown dataset: ${unknown}` }, 400);
-        return json(await loadDatasets(sql, sets));
+        return json(redactForRole(await loadDatasets(sql, sets), isAdmin));
       }
 
       case "keywordHistory": {
@@ -1255,9 +1269,11 @@ export default async (req) => {
         if (bad) return bad;
         const website = safeHttpUrl(o.website);
         if (website === null) return json({ error: "Website link must be an http(s) URL (or blank)." }, 400);
-        await sql`insert into orders (name, status, start_date, end_date, delivery_time, person, website, order_data, created_by)
+        // Only an admin may set the project price; anyone else creates it at 0.
+        const price = isAdmin ? (Number(o.price) || 0) : 0;
+        await sql`insert into orders (name, status, start_date, end_date, delivery_time, person, website, order_data, price, created_by)
           values (${String(o.name).trim()}, ${o.status || "not_started"}, ${o.start_date || null}, ${o.end_date || null},
-                  ${o.delivery_time || ""}, ${o.person || ""}, ${website}, ${o.order_data || ""},
+                  ${o.delivery_time || ""}, ${o.person || ""}, ${website}, ${o.order_data || ""}, ${price},
                   ${auth.name || o.created_by || ""})`;
         await logActivity(sql, { actor, verb: "added order", entity: "order", entity_label: String(o.name).trim() });
         return json({ ok: true });
@@ -1271,12 +1287,17 @@ export default async (req) => {
         if (bad) return bad;
         const website = safeHttpUrl(o.website);
         if (website === null) return json({ error: "Website link must be an http(s) URL (or blank)." }, 400);
+        // Shared fields anyone may edit. The price is admin-only: a non-admin
+        // update leaves the stored price untouched (never trusts the payload).
         await sql`update orders set
           name=${String(o.name).trim()}, status=${o.status || "not_started"},
           start_date=${o.start_date || null}, end_date=${o.end_date || null},
           delivery_time=${o.delivery_time || ""}, person=${o.person || ""},
           website=${website}, order_data=${o.order_data || ""}
           where id=${o.id}`;
+        if (isAdmin) {
+          await sql`update orders set price=${Number(o.price) || 0} where id=${o.id}`;
+        }
         await logActivity(sql, { actor, verb: "updated order", entity: "order", entity_label: String(o.name).trim() });
         return json({ ok: true });
       }

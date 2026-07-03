@@ -88,7 +88,9 @@ export const backlinksCsv = (backlinks, clients) => {
   ]);
 };
 
-export const ordersCsv = (orders) => toCsv(orders, [
+// Price is an admin-only column, so it's included only when withPrice is set
+// (the non-admin payload never carries it anyway).
+export const ordersCsv = (orders, withPrice = false) => toCsv(orders, [
   { header: "Name", value: (o) => o.name },
   { header: "Status", value: (o) => orderStatusLabel(o.status) },
   { header: "Start", value: (o) => (o.start_date ? String(o.start_date).slice(0, 10) : "") },
@@ -97,6 +99,7 @@ export const ordersCsv = (orders) => toCsv(orders, [
   { header: "Person", value: (o) => o.person || "" },
   { header: "Website", value: (o) => o.website || "" },
   { header: "Order Data", value: (o) => o.order_data || "" },
+  ...(withPrice ? [{ header: "Price", value: (o) => (o.price == null ? "" : o.price) }] : []),
 ]);
 
 export const aiCitationsCsv = (citations, clients) => {
