@@ -3,7 +3,7 @@
 // mocked global fetch for Google's token/userinfo endpoints. Covers the three
 // OAuth flows end-to-end at the Request/Response level.
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { signToken, verifyToken } from "../lib/auth.js";
+import { signToken, verifyToken } from "../../lib/auth.js";
 
 // ---- in-memory "database" ----
 const store = {
@@ -103,7 +103,7 @@ function sqlMock(strings, ...values) {
 }
 
 vi.mock("@netlify/neon", () => ({ neon: () => sqlMock }));
-const handler = (await import("./google.js")).default;
+const handler = (await import("../google.js")).default;
 
 // ---- Google endpoints mock ----
 const googleAccount = { id: "sub-123", email: "nik@agency.com" };
