@@ -1,5 +1,6 @@
 // Tiny client-side CSV export. Works on already-loaded data — no server round trip.
 import { typeLabel, deliverableStatusLabel, backlinkStatusLabel, orderStatusLabel, aiEngineLabel } from "./constants";
+import { isArchived } from "./orders";
 
 function esc(v) {
   const s = v == null ? "" : String(v);
@@ -100,6 +101,7 @@ export const backlinksCsv = (backlinks, clients) => {
 export const ordersCsv = (orders, withPrice = false) => toCsv(orders, [
   { header: "Name", value: (o) => o.name },
   { header: "Status", value: (o) => orderStatusLabel(o.status) },
+  { header: "Archived", value: (o) => (isArchived(o) ? "yes" : "no") },
   { header: "Source", value: (o) => o.source || "Direct" },
   { header: "Start", value: (o) => (o.start_date ? String(o.start_date).slice(0, 10) : "") },
   { header: "End / Delivered", value: (o) => (o.end_date ? String(o.end_date).slice(0, 10) : "") },
