@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { neon } from "@netlify/neon";
 import { newPasswordRecord, verifyPassword, signToken, verifyToken } from "../lib/auth.js";
 import { fileStore } from "../lib/files.js";
-import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, BACKLINK_STATES, AI_ENGINES, ACTIVITY_TYPES, typeLabel, activityLabel } from "../../src/lib/constants.js";
+import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, BACKLINK_STATES, ORDER_STATES, AI_ENGINES, ACTIVITY_TYPES, typeLabel, activityLabel } from "../../src/lib/constants.js";
 import { lastDayOfMonth } from "../../src/lib/format.js";
 
 // Uploaded client files live in the file_blobs table (see lib/files.js) so the
@@ -30,7 +30,7 @@ const json = (obj, status = 200) =>
 // once `clients` existed, so later ALTERs silently never reached live
 // databases. Deltas stay small on purpose — a migration run must fit inside
 // Cloudflare's per-invocation subrequest budget alongside the actual request.
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 async function runMigrations(sql, from) {
   if (from < 2) {
@@ -39,6 +39,25 @@ async function runMigrations(sql, from) {
       ip text primary key,
       fails integer default 0,
       reset_at timestamptz default now()
+    )`;
+  }
+  if (from < 3) {
+    // v3: standalone order tracker (the Orders tab). Not tied to clients —
+    // rows mirror the team's order spreadsheet, where the name is whatever
+    // identifies the order. The countdown column is computed in the UI from
+    // end_date, never stored.
+    await sql`create table if not exists orders (
+      id uuid primary key default gen_random_uuid(),
+      name text not null,
+      status text default 'not_started',    -- not_started / in_progress / finished / delivered
+      start_date date,
+      end_date date,                        -- due date, or the delivered date once done
+      delivery_time text default '',        -- 'HH:MM' (free text, display only)
+      person text default '',
+      website text default '',
+      order_data text default '',           -- what was ordered, e.g. "monthly seo"
+      created_by text default '',
+      created_at timestamptz default now()
     )`;
   }
   await sql`insert into schema_meta (id, version) values (1, ${SCHEMA_VERSION})
@@ -365,6 +384,8 @@ const DATASET_QUERIES = {
     (select h.*, row_number() over (partition by keyword_id order by recorded_at desc) rn from keyword_history h) t
     where rn <= 25 order by recorded_at asc`,
   backlinks: (sql) => sql`select * from backlinks order by created_at desc`,
+  // Soonest deadline first (like the spreadsheet); undated rows last.
+  orders: (sql) => sql`select * from orders order by end_date asc nulls last, created_at desc`,
   ai_citations: (sql) => sql`select * from ai_citations order by created_at desc`,
   // ai_citation_history is unbounded like keyword_history; only ship the last
   // 25 points per citation.
@@ -424,6 +445,7 @@ const TASK_STATE_KEYS = TASK_STATES.map((s) => s.key);
 const PAY_STATE_KEYS = PAY_STATES.map((s) => s.key);
 const DELIVERABLE_STATE_KEYS = DELIVERABLE_STATES.map((s) => s.key);
 const BACKLINK_STATE_KEYS = BACKLINK_STATES.map((s) => s.key);
+const ORDER_STATE_KEYS = ORDER_STATES.map((s) => s.key);
 const AI_ENGINE_KEYS = AI_ENGINES.map((e) => e.key);
 const ACTIVITY_TYPE_KEYS = ACTIVITY_TYPES.map((t) => t.key);
 const KEYWORD_PLATFORMS = ["desktop", "mobile"];
@@ -830,6 +852,7 @@ export default async (req) => {
           "ai_citation_history", "client_reports", "client_retainers",
           "team_members", "client_report_emails", "gsc_daily", "gsc_queries",
           "activities", "activity", "client_gsc_sites", "user_gsc_sites",
+          "orders",
         ];
         const [users, ...rows] = await Promise.all([
           sql`select id, name, email, role, active, created_at from users`,
@@ -855,6 +878,7 @@ export default async (req) => {
           // tables are owned by google.js and only exist once Google is used.
           Promise.resolve(sql`select * from client_gsc_sites order by client_id`).catch(() => []),
           Promise.resolve(sql`select * from user_gsc_sites order by user_id, site_url`).catch(() => []),
+          sql`select * from orders order by created_at`,
         ]);
         const tables = Object.fromEntries(names.map((n, i) => [n, rows[i]]));
         tables.users = users;
@@ -1221,6 +1245,46 @@ export default async (req) => {
         const blGone = await sql`select url, anchor_text, client_id from backlinks where id=${payload.id} limit 1`;
         await sql`delete from backlinks where id=${payload.id}`;
         if (blGone.length) await logActivity(sql, { actor, verb: "deleted backlink", entity: "backlink", entity_label: blGone[0].url || blGone[0].anchor_text || "", client_id: blGone[0].client_id });
+        return json({ ok: true });
+      }
+
+      case "orderCreate": {
+        const o = payload;
+        if (!o.name || !String(o.name).trim()) return json({ error: "An order name is required." }, 400);
+        const bad = badEnum("status", o.status, ORDER_STATE_KEYS);
+        if (bad) return bad;
+        const website = safeHttpUrl(o.website);
+        if (website === null) return json({ error: "Website link must be an http(s) URL (or blank)." }, 400);
+        await sql`insert into orders (name, status, start_date, end_date, delivery_time, person, website, order_data, created_by)
+          values (${String(o.name).trim()}, ${o.status || "not_started"}, ${o.start_date || null}, ${o.end_date || null},
+                  ${o.delivery_time || ""}, ${o.person || ""}, ${website}, ${o.order_data || ""},
+                  ${auth.name || o.created_by || ""})`;
+        await logActivity(sql, { actor, verb: "added order", entity: "order", entity_label: String(o.name).trim() });
+        return json({ ok: true });
+      }
+
+      case "orderUpdate": {
+        const o = payload;
+        if (!o.id) return json({ error: "Missing order id." }, 400);
+        if (!o.name || !String(o.name).trim()) return json({ error: "An order name is required." }, 400);
+        const bad = badEnum("status", o.status, ORDER_STATE_KEYS);
+        if (bad) return bad;
+        const website = safeHttpUrl(o.website);
+        if (website === null) return json({ error: "Website link must be an http(s) URL (or blank)." }, 400);
+        await sql`update orders set
+          name=${String(o.name).trim()}, status=${o.status || "not_started"},
+          start_date=${o.start_date || null}, end_date=${o.end_date || null},
+          delivery_time=${o.delivery_time || ""}, person=${o.person || ""},
+          website=${website}, order_data=${o.order_data || ""}
+          where id=${o.id}`;
+        await logActivity(sql, { actor, verb: "updated order", entity: "order", entity_label: String(o.name).trim() });
+        return json({ ok: true });
+      }
+
+      case "orderDelete": {
+        // Not admin-gated — only client deletion is.
+        const oGone = await sql`delete from orders where id=${payload.id} returning name`;
+        if (oGone.length) await logActivity(sql, { actor, verb: "deleted order", entity: "order", entity_label: oGone[0].name });
         return json({ ok: true });
       }
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles, Menu, X, Settings as SettingsIcon, TrendingUp, Globe } from "lucide-react";
+import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles, Menu, X, Settings as SettingsIcon, TrendingUp, Globe, Package } from "lucide-react";
 import * as api from "../lib/api";
 import { ink, accent, cream, sideBg, sideText, disp, BD, BDt, SHs, tint, btn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
@@ -11,6 +11,7 @@ import ActivityLog from "./ActivityLog";
 import Clients from "./Clients";
 import Board from "./Board";
 import Deliverables from "./Deliverables";
+import Orders from "./Orders";
 import Backlinks from "./Backlinks";
 import Keywords from "./Keywords";
 import AiVisibility from "./AiVisibility";
@@ -30,6 +31,7 @@ export default function Dashboard({ session, onSignOut }) {
   const [payments, setPayments] = useState([]);
   const [resources, setResources] = useState([]);
   const [deliverables, setDeliverables] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [backlinks, setBacklinks] = useState([]);
   const [keywords, setKeywords] = useState([]);
   const [keywordHistory, setKeywordHistory] = useState([]);
@@ -83,6 +85,7 @@ export default function Dashboard({ session, onSignOut }) {
     payments: setPayments,
     resources: setResources,
     deliverables: setDeliverables,
+    orders: setOrders,
     backlinks: setBacklinks,
     keywords: setKeywords,
     keyword_history: setKeywordHistory,
@@ -225,6 +228,14 @@ export default function Dashboard({ session, onSignOut }) {
   // Top up this month's deliverables to every active client's retainer scope.
   const generateDeliverables = () => run(() => api.generateMonthDeliverables({ all: true, month: ym(new Date()) }), ["deliverables"]);
 
+  const createOrder = (o) => run(() => api.createOrder({ ...o, created_by: session.name }), ["orders"]);
+  const updateOrder = (o) => run(() => api.updateOrder(o), ["orders"]);
+  const statusOrder = (o) => {
+    setOrders((os) => os.map((x) => (x.id === o.id ? { ...x, ...o } : x)));
+    run(() => api.updateOrder(o), ["orders"]);
+  };
+  const delOrder = (id) => { if (window.confirm("Delete this order?")) run(() => api.deleteOrder(id), ["orders"], "Order deleted"); };
+
   const createBacklink = (b) => run(() => api.createBacklink({ ...b, created_by: session.name }), ["backlinks"]);
   const updateBacklink = (b) => {
     setBacklinks((bs) => bs.map((x) => (x.id === b.id ? { ...x, ...b } : x)));
@@ -267,6 +278,7 @@ export default function Dashboard({ session, onSignOut }) {
     { k: "clients", l: "Clients", i: FolderKanban },
     { k: "tasks", l: "Task Board", i: CheckSquare },
     { k: "deliverables", l: "Deliverables", i: ClipboardList },
+    { k: "orders", l: "Orders", i: Package },
     { k: "backlinks", l: "Backlinks", i: Link2 },
     { k: "keywords", l: "Rank Tracker", i: TrendingUp },
     { k: "websites", l: "Websites", i: Globe },
@@ -401,6 +413,7 @@ export default function Dashboard({ session, onSignOut }) {
                 tab === "clients" ? <Clients clients={clients} deliverables={deliverables} payments={payments} tasks={tasks} keywords={keywords} activities={activities} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} onAdd={openAddClient} /> :
                 tab === "tasks" ? <Board clients={clients} tasks={tasks} members={members} onAdd={saveTask} onMove={moveTask} onAssign={assignTask} onDelete={delTask} /> :
                 tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onSave={saveDeliverable} onStatus={statusDeliverable} onDelete={delDeliverable} onGenerate={generateDeliverables} /> :
+                tab === "orders" ? <Orders orders={orders} onCreate={createOrder} onUpdate={updateOrder} onStatus={statusOrder} onDelete={delOrder} /> :
                 tab === "backlinks" ? <Backlinks clients={clients} backlinks={backlinks} onCreate={createBacklink} onUpdate={updateBacklink} onDelete={delBacklink} /> :
                 tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
                 tab === "websites" ? <Websites onOpen={(site) => navigate(websitePath(site))} /> :
