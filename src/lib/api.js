@@ -170,6 +170,11 @@ export const createBacklink = (b) => call("backlinkCreate", b);
 export const updateBacklink = (b) => call("backlinkUpdate", b);
 export const deleteBacklink = (id) => call("backlinkDelete", { id });
 
+/* ---------------- orders (standalone order tracker) ---------------- */
+export const createOrder = (o) => call("orderCreate", o);
+export const updateOrder = (o) => call("orderUpdate", o);
+export const deleteOrder = (id) => call("orderDelete", { id });
+
 /* ---------------- AI visibility (AEO citation tracking) ---------------- */
 export const createAiCitation = (c) => call("aiCitationCreate", c);
 export const updateAiCitation = (c) => call("aiCitationUpdate", c);

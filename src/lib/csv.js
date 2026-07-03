@@ -1,5 +1,5 @@
 // Tiny client-side CSV export. Works on already-loaded data — no server round trip.
-import { typeLabel, deliverableStatusLabel, backlinkStatusLabel, aiEngineLabel } from "./constants";
+import { typeLabel, deliverableStatusLabel, backlinkStatusLabel, orderStatusLabel, aiEngineLabel } from "./constants";
 
 function esc(v) {
   const s = v == null ? "" : String(v);
@@ -87,6 +87,17 @@ export const backlinksCsv = (backlinks, clients) => {
     { header: "Notes", value: (b) => b.notes },
   ]);
 };
+
+export const ordersCsv = (orders) => toCsv(orders, [
+  { header: "Name", value: (o) => o.name },
+  { header: "Status", value: (o) => orderStatusLabel(o.status) },
+  { header: "Start", value: (o) => (o.start_date ? String(o.start_date).slice(0, 10) : "") },
+  { header: "End / Delivered", value: (o) => (o.end_date ? String(o.end_date).slice(0, 10) : "") },
+  { header: "Time", value: (o) => o.delivery_time || "" },
+  { header: "Person", value: (o) => o.person || "" },
+  { header: "Website", value: (o) => o.website || "" },
+  { header: "Order Data", value: (o) => o.order_data || "" },
+]);
 
 export const aiCitationsCsv = (citations, clients) => {
   const names = namesOf(clients);

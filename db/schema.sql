@@ -147,6 +147,23 @@ create table if not exists backlinks (
   created_at timestamptz default now()
 );
 
+-- Orders: standalone order tracker (the Orders tab). Not tied to clients —
+-- rows mirror the team's order spreadsheet. The "count down" column shown in
+-- the UI is computed from end_date, never stored.
+create table if not exists orders (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  status text default 'not_started',       -- not_started / in_progress / finished / delivered
+  start_date date,
+  end_date date,                           -- due date, or the delivered date once done
+  delivery_time text default '',           -- 'HH:MM' (free text, display only)
+  person text default '',
+  website text default '',
+  order_data text default '',              -- what was ordered, e.g. "monthly seo"
+  created_by text default '',
+  created_at timestamptz default now()
+);
+
 -- AI visibility (AEO): whether a client gets cited in AI answers (ChatGPT,
 -- Perplexity, Google AI Overviews, Claude, Gemini) for given prompts. Each row
 -- is the CURRENT state per prompt+engine; changes to cited/position append a

@@ -37,6 +37,15 @@ export const BACKLINK_STATES = [
 // the old fallback displayed any unrecognized value as "Live".
 export const backlinkStatusLabel = (k) => BACKLINK_STATES.find((s) => s.key === k)?.label || (k ? String(k) : "Unknown");
 
+// Orders: lifecycle of a one-off client order (the Orders tab).
+export const ORDER_STATES = [
+  { key: "not_started", label: "Not Started" },
+  { key: "in_progress", label: "In Progress" },
+  { key: "finished", label: "Finished" },
+  { key: "delivered", label: "Delivered" },
+];
+export const orderStatusLabel = (k) => ORDER_STATES.find((s) => s.key === k)?.label || (k ? String(k) : "Unknown");
+
 // AI answer engines tracked by the AI-visibility (AEO) module.
 export const AI_ENGINES = [
   { key: "chatgpt", label: "ChatGPT" },
