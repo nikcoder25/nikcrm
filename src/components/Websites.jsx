@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Globe, Plus, Trash2, RefreshCw, Loader, ChevronRight, ArrowLeft, Check } from "lucide-react";
-import { ink, accent, disp, BD, BDt, SH, btn, iconBtn } from "../lib/theme";
+import { ink, accent, disp, BD, BDt, SH, btn, iconBtn, sel } from "../lib/theme";
 import { gscSites, gscSiteList, gscSiteAdd, gscSiteRemove, gscSiteData, googleStatus } from "../lib/google";
 import { dateLabel } from "../lib/format";
 import { useToast } from "../lib/toast";
 import { Panel, Empty, Center, Modal } from "./ui";
-import { GSC_GRAY, GSC_RED, gscDay, gscWindows, pctChange, GscStat, GscClicksChart, GscQueriesTable } from "./GscBits";
+import { GSC_GRAY, GSC_RED, GSC_METRIC_META, gscDay, gscWindows, pctChange, GscStat, GscTrendChart, GscQueriesTable } from "./GscBits";
 
 /* ---------------- Websites (per-user Search Console) ----------------
    The tab shows a light LIST of the websites the current user imported; each
@@ -17,6 +17,40 @@ import { GSC_GRAY, GSC_RED, gscDay, gscWindows, pctChange, GscStat, GscClicksCha
 
 const pct1 = (v) => `${(v * 100).toFixed(1)}%`;
 
+// The metric views for the daily chart on a website's page.
+const METRIC_TABS = [
+  { key: "clicks", label: "Clicks", metrics: ["clicks"], title: "Daily clicks" },
+  { key: "impressions", label: "Impressions", metrics: ["impressions"], title: "Daily impressions" },
+  { key: "both", label: "Clicks + Impressions", metrics: ["clicks", "impressions"], title: "Daily clicks & impressions" },
+];
+
+// How far back the daily chart plots. The site's cached daily series covers ~12
+// months, so these all slice one already-loaded dataset — no extra fetch.
+const RANGES = [
+  { days: 30, label: "Last 30 days" },
+  { days: 90, label: "Last 90 days" },
+  { days: 182, label: "Last 6 months" },
+  { days: 365, label: "Last 12 months" },
+];
+
+// Segmented control to pick which metric(s) the daily chart plots.
+function MetricToggle({ value, onChange }) {
+  return (
+    <div role="tablist" aria-label="Chart metric" style={{ display: "inline-flex", border: BDt, borderRadius: 9, overflow: "hidden", background: "#fff" }}>
+      {METRIC_TABS.map((t, i) => {
+        const on = value === t.key;
+        return (
+          <button key={t.key} role="tab" aria-selected={on} onClick={() => onChange(t.key)}
+            style={{ padding: "6px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", border: "none",
+              borderLeft: i ? "1px solid #e8e4d8" : "none", background: on ? accent : "transparent", color: on ? "#fff" : GSC_GRAY }}>
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ---------- import modal: the user's sites as click-to-add rows ---------- */
 function ImportModal({ imported, onAdded, onClose }) {
   const [available, setAvailable] = useState(null); // null = loading
@@ -27,23 +61,34 @@ function ImportModal({ imported, onAdded, onClose }) {
   useEffect(() => {
     let alive = true;
     gscSites()
-      .then((r) => { if (alive) setAvailable((r.sites || []).map((s) => s.site_url)); })
+      .then((r) => {
+        if (!alive) return;
+        // Sites can arrive from several connected accounts. Keep one row per
+        // site_url (the first account that can read it), tagged with its account.
+        const byUrl = new Map();
+        for (const s of r.sites || []) {
+          if (!byUrl.has(s.site_url)) byUrl.set(s.site_url, { site_url: s.site_url, account_email: s.account_email || "" });
+        }
+        setAvailable([...byUrl.values()]);
+      })
       .catch((e) => { if (alive) { setAvailable([]); toast(e?.message || "Could not list your Search Console sites.", "error"); } });
     return () => { alive = false; };
   }, []);
 
   const add = async (site) => {
-    setBusySite(site);
+    setBusySite(site.site_url);
     try {
-      await gscSiteAdd(site);
-      setAdded((s) => new Set(s).add(site));
-      onAdded(site);
+      await gscSiteAdd(site.site_url, site.account_email);
+      setAdded((s) => new Set(s).add(site.site_url));
+      onAdded(site.site_url);
       toast("Website imported");
     } catch (e) { toast(e?.message || "Could not import the site.", "error"); }
     setBusySite("");
   };
 
-  const candidates = (available || []).filter((s) => !imported.includes(s) || added.has(s));
+  const candidates = (available || []).filter((s) => !imported.includes(s.site_url) || added.has(s.site_url));
+  // Show the source account under each site only when more than one is connected.
+  const multiAccount = new Set((available || []).map((s) => s.account_email).filter(Boolean)).size > 1;
 
   return (
     <Modal title="Import a website" onClose={onClose} maxWidth={520}>
@@ -57,16 +102,21 @@ function ImportModal({ imported, onAdded, onClose }) {
       ) : (
         <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
           {candidates.map((site) => {
-            const done = added.has(site);
+            const done = added.has(site.site_url);
             return (
-              <div key={site} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #f0ece2" }}>
+              <div key={site.site_url} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #f0ece2" }}>
                 <Globe size={15} style={{ color: accent, flexShrink: 0 }} />
-                <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 800, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{site}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{site.site_url}</div>
+                  {multiAccount && site.account_email && (
+                    <div style={{ fontSize: 11, color: GSC_GRAY, fontWeight: 700, marginTop: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{site.account_email}</div>
+                  )}
+                </div>
                 {done ? (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 800, color: "#1f9d57" }}><Check size={14} /> Added</span>
                 ) : (
-                  <button style={{ ...btn(accent, "#fff"), padding: "6px 12px", fontSize: 12 }} disabled={busySite === site} onClick={() => add(site)}>
-                    {busySite === site ? <Loader size={13} className="spin" /> : <Plus size={13} />} Add
+                  <button style={{ ...btn(accent, "#fff"), padding: "6px 12px", fontSize: 12 }} disabled={busySite === site.site_url} onClick={() => add(site)}>
+                    {busySite === site.site_url ? <Loader size={13} className="spin" /> : <Plus size={13} />} Add
                   </button>
                 )}
               </div>
@@ -82,7 +132,10 @@ function ImportModal({ imported, onAdded, onClose }) {
 export function WebsiteDetail({ site, onBack, onRemoved }) {
   // null = loading; { error } = failed; else { daily, queries }.
   const [data, setData] = useState(null);
+  const [metric, setMetric] = useState("clicks"); // which series the daily chart plots
+  const [rangeDays, setRangeDays] = useState(90);  // how far back the chart plots
   const toast = useToast();
+  const tab = METRIC_TABS.find((t) => t.key === metric) || METRIC_TABS[0];
 
   const load = (force = false) => {
     setData(null);
@@ -117,12 +170,31 @@ export function WebsiteDetail({ site, onBack, onRemoved }) {
             <GscStat label="CTR · 28d" value={pct1(w.cur.ctr)} />
             <GscStat label="Avg position · 28d" value={w.cur.position ? w.cur.position.toFixed(1) : "—"} />
           </div>
-          {daily.length >= 2 && (
-            <div style={{ border: BDt, borderRadius: 12, background: "#faf8f2", padding: 14, marginBottom: 14 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 8 }}>Daily clicks — last {daily.length} days</div>
-              <div className="scroll-x"><GscClicksChart daily={daily} width={860} height={190} /></div>
-            </div>
-          )}
+          {daily.length >= 2 && (() => {
+            const chartDaily = daily.slice(-rangeDays);
+            return (
+              <div style={{ border: BDt, borderRadius: 12, background: "#faf8f2", padding: 14, marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 800 }}>{tab.title}</span>
+                    {tab.metrics.map((m) => (
+                      <span key={m} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 800, color: GSC_GRAY }}>
+                        <span style={{ width: 10, height: 10, borderRadius: 3, background: GSC_METRIC_META[m].color }} /> {GSC_METRIC_META[m].label}
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <select aria-label="Time range" value={rangeDays} onChange={(e) => setRangeDays(Number(e.target.value))}
+                      style={{ ...sel, flex: "none", minWidth: 0, padding: "7px 10px", fontSize: 12, fontWeight: 800 }}>
+                      {RANGES.map((r) => <option key={r.days} value={r.days}>{r.label}</option>)}
+                    </select>
+                    <MetricToggle value={metric} onChange={setMetric} />
+                  </div>
+                </div>
+                <div className="scroll-x"><GscTrendChart daily={chartDaily} metrics={tab.metrics} width={860} height={190} /></div>
+              </div>
+            );
+          })()}
           <GscQueriesTable queries={data.queries || []} title="Top queries — last 28 days" />
         </>
       );

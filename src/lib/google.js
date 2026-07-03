@@ -26,7 +26,13 @@ export const googleStatus = () => gcall("status");
 // when the API lives on another origin (Cloudflare Worker + static frontend).
 export const googleAuthUrl = (by, workspace = false) => gcall("authUrl", { by, workspace, app_origin: window.location.origin });
 export const googleDisconnect = (workspace = false) => gcall("disconnect", { workspace });
-export const pushToCalendar = (activity_id) => gcall("calendarPush", { activity_id });
+// Every Google account the current user has connected (for Settings + pickers).
+export const googleAccounts = () => gcall("googleAccounts");
+// Disconnect one connected account by its email (multi-account).
+export const googleDisconnectAccount = (account_email) => gcall("googleDisconnectAccount", { account_email });
+// Push a follow-up/meeting to Google Calendar; account_email picks which
+// connected account's calendar (blank = the primary connection).
+export const pushToCalendar = (activity_id, account_email = "") => gcall("calendarPush", { activity_id, account_email });
 export const syncGmail = (client_id) => gcall("gmailSync", { client_id });
 // Public (no session yet): start "Sign in with Google" from the login screen.
 export const googleSsoUrl = () => gcall("ssoStart", { app_origin: window.location.origin });
@@ -36,7 +42,7 @@ export const googleSsoUrl = () => gcall("ssoStart", { app_origin: window.locatio
    (server-side; the browser only ever sees the resulting numbers). */
 export const gscSites = () => gcall("gscSites");                                  // live list from Google
 export const gscSiteList = () => gcall("gscSiteList");                            // imported into Websites
-export const gscSiteAdd = (site_url) => gcall("gscSiteAdd", { site_url });
+export const gscSiteAdd = (site_url, account_email = "") => gcall("gscSiteAdd", { site_url, account_email });
 export const gscSiteRemove = (site_url) => gcall("gscSiteRemove", { site_url });
 export const gscSiteData = (site_url, force = false) => gcall("gscSiteData", { site_url, force });
 export const gscAttach = (client_id, site_url) => gcall("gscAttach", { client_id, site_url });

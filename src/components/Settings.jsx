@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Plug, Check, RefreshCw, Calendar, Mail, Loader, DatabaseBackup, Building2, Globe } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, btn } from "../lib/theme";
-import { googleStatus, googleAuthUrl, googleDisconnect } from "../lib/google";
+import { googleStatus, googleAuthUrl, googleDisconnect, googleAccounts, googleDisconnectAccount } from "../lib/google";
 import { backupExport } from "../lib/api";
 import { todayStr } from "../lib/format";
 import { useToast } from "../lib/toast";
@@ -13,12 +13,22 @@ import { Panel, Center } from "./ui";
 // legacy workspace-wide fallback connection.
 export default function Settings({ isAdmin, name, onConnected }) {
   const [status, setStatus] = useState(null);
+  const [accounts, setAccounts] = useState([]); // all connected Google accounts (multi-account)
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
   const refresh = async () => {
-    try { const s = await googleStatus(); setStatus(s); onConnected?.(Boolean(s.connected)); }
+    try {
+      const s = await googleStatus();
+      setStatus(s);
+      onConnected?.(Boolean(s.connected));
+      // Best-effort: the connected-accounts list only applies to personal sessions.
+      if (s.user_account) {
+        try { const r = await googleAccounts(); setAccounts(r.accounts || []); }
+        catch { setAccounts([]); }
+      } else setAccounts([]);
+    }
     catch (e) { toast(e?.message || "Could not read integration status.", "error"); }
   };
   useEffect(() => { (async () => { setLoading(true); await refresh(); setLoading(false); })(); }, []);
@@ -33,6 +43,14 @@ export default function Settings({ isAdmin, name, onConnected }) {
     setBusy(true);
     try { await googleDisconnect(workspace); await refresh(); toast(workspace ? "Workspace fallback disconnected" : "Google disconnected"); }
     catch (e) { toast(e?.message || "Could not disconnect.", "error"); }
+    setBusy(false);
+  };
+
+  const disconnectAccount = async (email) => {
+    if (!window.confirm(`Disconnect ${email}? Websites imported from this account are removed with it.`)) return;
+    setBusy(true);
+    try { await googleDisconnectAccount(email); await refresh(); toast("Account disconnected"); }
+    catch (e) { toast(e?.message || "Could not disconnect the account.", "error"); }
     setBusy(false);
   };
 
@@ -110,19 +128,32 @@ export default function Settings({ isAdmin, name, onConnected }) {
             </div>
           )}
 
-          {configured && userAccount && userConnected && (
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", background: "#dff3e8", border: "2px solid #1f7a4d", borderRadius: 10, padding: "12px 14px" }}>
-              <Check size={18} style={{ color: "#1f7a4d" }} />
-              <div style={{ flex: 1, minWidth: 160 }}>
-                <div style={{ fontWeight: 800, fontSize: 13.5 }}>{status.user_email || "Your Google account"}</div>
-                <div style={{ fontSize: 12, color: "#4b4560", fontWeight: 600 }}>Gmail &amp; Calendar sync runs as you on client pages.</div>
+          {configured && userAccount && accounts.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+                {accounts.map((a, i) => (
+                  <div key={a.account_email} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", background: "#dff3e8", border: "2px solid #1f7a4d", borderRadius: 10, padding: "12px 14px" }}>
+                    <Check size={18} style={{ color: "#1f7a4d" }} />
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={{ fontWeight: 800, fontSize: 13.5 }}>{a.account_email || "Your Google account"}</div>
+                      <div style={{ fontSize: 12, color: "#4b4560", fontWeight: 600 }}>
+                        {i === 0 ? "Gmail & Calendar sync runs as this account. " : ""}Import its Search Console sites on the Websites tab.
+                      </div>
+                    </div>
+                    <button style={{ ...btn("#fff", "#c0392b"), fontSize: 12.5 }} disabled={busy} onClick={() => disconnectAccount(a.account_email)}>Disconnect</button>
+                  </div>
+                ))}
               </div>
-              <button style={{ ...btn("#fff", ink), fontSize: 12.5 }} disabled={busy} onClick={refresh}><RefreshCw size={14} /> Refresh</button>
-              <button style={{ ...btn("#fff", "#c0392b"), fontSize: 12.5 }} disabled={busy} onClick={() => disconnect(false)}>Disconnect</button>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button style={{ ...btn(accent, "#fff"), fontSize: 12.5 }} disabled={busy} onClick={() => connect(false)}>
+                  {busy ? <Loader size={15} className="spin" /> : <Plug size={15} />} Add another Google account
+                </button>
+                <button style={{ ...btn("#fff", ink), fontSize: 12.5 }} disabled={busy} onClick={refresh}><RefreshCw size={14} /> Refresh</button>
+              </div>
             </div>
           )}
 
-          {configured && userAccount && !userConnected && (
+          {configured && userAccount && accounts.length === 0 && (
             <button style={{ ...btn(accent, "#fff"), justifyContent: "center" }} disabled={busy} onClick={() => connect(false)}>
               {busy ? <Loader size={16} className="spin" /> : <Plug size={16} />} {busy ? "Redirecting…" : "Connect your Google account"}
             </button>

@@ -8,6 +8,15 @@ export const GSC_GREEN = "#1f9d57";
 export const GSC_RED = "#c0392b";
 export const GSC_GRAY = "#6b6580";
 
+// Per-metric line color. Clicks keep the app accent (purple) they've always
+// had; impressions get a distinct blue so the two read apart on one chart.
+export const GSC_CLICKS = accent;
+export const GSC_IMPRESSIONS = "#0ea5e9";
+export const GSC_METRIC_META = {
+  clicks: { key: "clicks", label: "Clicks", color: GSC_CLICKS },
+  impressions: { key: "impressions", label: "Impressions", color: GSC_IMPRESSIONS },
+};
+
 // Normalize a daily row: date as 'YYYY-MM-DD', numbers as numbers.
 export const gscDay = (d) => ({
   date: String(d.date).slice(0, 10),
@@ -56,37 +65,67 @@ export function GscStat({ label, value, change }) {
   );
 }
 
-// SVG line chart of daily clicks — same inline-SVG style as the rank chart in
-// Keywords.jsx, but with a normal y-axis (0 at the bottom, clicks up).
-export function GscClicksChart({ daily, width = 620, height = 150 }) {
-  const pts = daily.map((d) => ({ v: d.clicks, t: new Date(d.date + "T00:00:00Z").getTime() }));
-  if (pts.length < 2) return null;
-  const max = Math.max(1, ...pts.map((p) => p.v));
-  const padL = 42, padR = 12, padT = 10, padB = 24;
+// Compact axis number: 2500 → "2.5k", 51000 → "51k", small values as-is.
+const fmtAxis = (v) => (v >= 1000 ? `${+(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `${Math.round(v)}`);
+
+// SVG line chart of one or two daily GSC metrics — same inline-SVG style as the
+// rank chart in Keywords.jsx, y-axis normal (0 at the bottom). `metrics` is a
+// list of keys from GSC_METRIC_META (e.g. ["clicks"], ["clicks","impressions"]).
+// Clicks and impressions differ by orders of magnitude, so each series is scaled
+// to its OWN max on its OWN axis (first → left, second → right); axis labels are
+// tinted to match their line so it's clear which scale belongs to which metric.
+export function GscTrendChart({ daily, metrics = ["clicks"], width = 620, height = 150 }) {
+  const series = metrics.map((m) => GSC_METRIC_META[m]).filter(Boolean);
+  if (!series.length || daily.length < 2) return null;
+  const times = daily.map((d) => new Date(d.date + "T00:00:00Z").getTime());
+  const t0 = times[0], t1 = times[times.length - 1];
+  const dual = series.length > 1;
+  const padL = 44, padR = dual ? 50 : 12, padT = 10, padB = 24;
   const iw = width - padL - padR, ih = height - padT - padB;
-  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
   const x = (t) => padL + (t1 > t0 ? (t - t0) / (t1 - t0) : 0.5) * iw;
-  const y = (v) => padT + (1 - v / max) * ih;
-  const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
-  const yTicks = [...new Set([0, Math.round(max / 2), max])];
-  const nX = Math.max(2, Math.min(5, pts.length));
+
+  const built = series.map((s) => {
+    const max = Math.max(1, ...daily.map((d) => Number(d[s.key]) || 0));
+    const y = (v) => padT + (1 - v / max) * ih;
+    const path = daily.map((d, i) => `${i === 0 ? "M" : "L"}${x(times[i]).toFixed(1)},${y(Number(d[s.key]) || 0).toFixed(1)}`).join(" ");
+    const ticks = [...new Set([0, Math.round(max / 2), max])];
+    return { ...s, max, y, path, ticks, last: Number(daily[daily.length - 1][s.key]) || 0 };
+  });
+  const [left, right] = built;
+
+  const nX = Math.max(2, Math.min(5, daily.length));
   const xTicks = Array.from({ length: nX }, (_, i) => t0 + (i / (nX - 1)) * Math.max(1, t1 - t0));
   const fmtTick = (t) => new Date(t).toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" });
+
   return (
     <svg width={width} height={height} style={{ display: "block", overflow: "visible" }}>
-      {yTicks.map((v) => (
+      {/* Gridlines + left-axis labels follow the first series' scale. */}
+      {left.ticks.map((v) => (
         <g key={`y${v}`}>
-          <line x1={padL} x2={width - padR} y1={y(v)} y2={y(v)} stroke="#e8e4d8" strokeWidth="1" />
-          <text x={padL - 7} y={y(v) + 3.5} textAnchor="end" fontSize="10" fontWeight="700" fill={GSC_GRAY}>{v.toLocaleString()}</text>
+          <line x1={padL} x2={width - padR} y1={left.y(v)} y2={left.y(v)} stroke="#e8e4d8" strokeWidth="1" />
+          <text x={padL - 7} y={left.y(v) + 3.5} textAnchor="end" fontSize="10" fontWeight="700" fill={left.color}>{fmtAxis(v)}</text>
         </g>
+      ))}
+      {/* Right-axis labels (second series), aligned to the same 0/mid/max heights. */}
+      {right && right.ticks.map((v) => (
+        <text key={`ry${v}`} x={width - padR + 7} y={right.y(v) + 3.5} textAnchor="start" fontSize="10" fontWeight="700" fill={right.color}>{fmtAxis(v)}</text>
       ))}
       {xTicks.map((t, i) => (
         <text key={`x${i}`} x={x(t)} y={height - 8} textAnchor="middle" fontSize="10" fontWeight="700" fill={GSC_GRAY}>{fmtTick(t)}</text>
       ))}
-      <path d={d} fill="none" stroke={accent} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={x(pts[pts.length - 1].t)} cy={y(pts[pts.length - 1].v)} r="2.5" fill={accent} />
+      {built.map((s) => (
+        <g key={s.key}>
+          <path d={s.path} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          <circle cx={x(t1)} cy={s.y(s.last)} r="2.5" fill={s.color} />
+        </g>
+      ))}
     </svg>
   );
+}
+
+// Back-compat: the client-detail organic panel still asks for clicks only.
+export function GscClicksChart(props) {
+  return <GscTrendChart {...props} metrics={["clicks"]} />;
 }
 
 // Top-queries table shared by the client panel and the Websites dashboard.

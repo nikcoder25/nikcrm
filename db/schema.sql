@@ -344,10 +344,31 @@ create table if not exists user_google_tokens (
   updated_at timestamptz default now()
 );
 
+-- Additional connected Google accounts per user (multi-account). user_google_tokens
+-- above stays the PRIMARY connection (Gmail + default calendar); this table lets a
+-- user connect several accounts and import Search Console sites / push calendar
+-- events from any of them. Keyed by (user_id, account_email). Applied at runtime by
+-- google.js's ensureSchema, which also backfills existing single connections here.
+create table if not exists user_google_accounts (
+  user_id text not null,
+  account_email text not null,
+  google_sub text default '',
+  access_token text default '',
+  refresh_token text default '',
+  token_expiry timestamptz,
+  scope text default '',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  primary key (user_id, account_email)
+);
+
 -- Search Console sites a user imported into their Websites dashboard.
+-- account_email records which connected Google account owns the site (empty on
+-- pre-multi-account rows → the user's primary token is used).
 create table if not exists user_gsc_sites (
   user_id text not null,
   site_url text not null,
+  account_email text default '',
   added_at timestamptz default now(),
   primary key (user_id, site_url)
 );
