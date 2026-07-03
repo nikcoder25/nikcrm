@@ -322,7 +322,13 @@ async function gscSearchAnalytics(token, siteUrl, body) {
 
 const gscNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-// Site data (daily series ~90d + top queries 28d) from the cache, refetched
+// How far back the daily series is fetched. The frontend's time-frame selector
+// (30d / 90d / 6mo / 12mo) slices this cached series client-side, so one fetch
+// covers every range with no extra Google calls. 365 daily rows stays well
+// under the rowLimit and the ~2-call-per-request budget.
+const GSC_DAILY_WINDOW = 365;
+
+// Site data (daily series ~12mo + top queries 28d) from the cache, refetched
 // with the OWNER user's token when stale. Shape matches what the frontend's
 // organic panels already consume: {daily, queries, month} (month is null —
 // per-user queries are a rolling 28-day window, not calendar-month buckets).
@@ -333,7 +339,7 @@ async function gscSiteData(sql, ownerUserId, siteUrl, force = false) {
   }
   const token = await getUserAccessToken(sql, ownerUserId);
   const [dailyRows, queryRows] = await Promise.all([
-    gscSearchAnalytics(token, siteUrl, { startDate: gscDaysAgo(90), endDate: gscDaysAgo(1), dimensions: ["date"], rowLimit: 500 }),
+    gscSearchAnalytics(token, siteUrl, { startDate: gscDaysAgo(GSC_DAILY_WINDOW), endDate: gscDaysAgo(1), dimensions: ["date"], rowLimit: 500 }),
     gscSearchAnalytics(token, siteUrl, { startDate: gscDaysAgo(28), endDate: gscDaysAgo(1), dimensions: ["query"], rowLimit: 15 }),
   ]);
   const data = {

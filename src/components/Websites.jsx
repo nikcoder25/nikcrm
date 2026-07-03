@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Globe, Plus, Trash2, RefreshCw, Loader, ChevronRight, ArrowLeft, Check } from "lucide-react";
-import { ink, accent, disp, BD, BDt, SH, btn, iconBtn } from "../lib/theme";
+import { ink, accent, disp, BD, BDt, SH, btn, iconBtn, sel } from "../lib/theme";
 import { gscSites, gscSiteList, gscSiteAdd, gscSiteRemove, gscSiteData, googleStatus } from "../lib/google";
 import { dateLabel } from "../lib/format";
 import { useToast } from "../lib/toast";
@@ -22,6 +22,15 @@ const METRIC_TABS = [
   { key: "clicks", label: "Clicks", metrics: ["clicks"], title: "Daily clicks" },
   { key: "impressions", label: "Impressions", metrics: ["impressions"], title: "Daily impressions" },
   { key: "both", label: "Clicks + Impressions", metrics: ["clicks", "impressions"], title: "Daily clicks & impressions" },
+];
+
+// How far back the daily chart plots. The site's cached daily series covers ~12
+// months, so these all slice one already-loaded dataset — no extra fetch.
+const RANGES = [
+  { days: 30, label: "Last 30 days" },
+  { days: 90, label: "Last 90 days" },
+  { days: 182, label: "Last 6 months" },
+  { days: 365, label: "Last 12 months" },
 ];
 
 // Segmented control to pick which metric(s) the daily chart plots.
@@ -108,6 +117,7 @@ export function WebsiteDetail({ site, onBack, onRemoved }) {
   // null = loading; { error } = failed; else { daily, queries }.
   const [data, setData] = useState(null);
   const [metric, setMetric] = useState("clicks"); // which series the daily chart plots
+  const [rangeDays, setRangeDays] = useState(90);  // how far back the chart plots
   const toast = useToast();
   const tab = METRIC_TABS.find((t) => t.key === metric) || METRIC_TABS[0];
 
@@ -144,22 +154,31 @@ export function WebsiteDetail({ site, onBack, onRemoved }) {
             <GscStat label="CTR · 28d" value={pct1(w.cur.ctr)} />
             <GscStat label="Avg position · 28d" value={w.cur.position ? w.cur.position.toFixed(1) : "—"} />
           </div>
-          {daily.length >= 2 && (
-            <div style={{ border: BDt, borderRadius: 12, background: "#faf8f2", padding: 14, marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 800 }}>{tab.title} — last {daily.length} days</span>
-                  {tab.metrics.map((m) => (
-                    <span key={m} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 800, color: GSC_GRAY }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 3, background: GSC_METRIC_META[m].color }} /> {GSC_METRIC_META[m].label}
-                    </span>
-                  ))}
+          {daily.length >= 2 && (() => {
+            const chartDaily = daily.slice(-rangeDays);
+            return (
+              <div style={{ border: BDt, borderRadius: 12, background: "#faf8f2", padding: 14, marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 800 }}>{tab.title}</span>
+                    {tab.metrics.map((m) => (
+                      <span key={m} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 800, color: GSC_GRAY }}>
+                        <span style={{ width: 10, height: 10, borderRadius: 3, background: GSC_METRIC_META[m].color }} /> {GSC_METRIC_META[m].label}
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <select aria-label="Time range" value={rangeDays} onChange={(e) => setRangeDays(Number(e.target.value))}
+                      style={{ ...sel, flex: "none", minWidth: 0, padding: "7px 10px", fontSize: 12, fontWeight: 800 }}>
+                      {RANGES.map((r) => <option key={r.days} value={r.days}>{r.label}</option>)}
+                    </select>
+                    <MetricToggle value={metric} onChange={setMetric} />
+                  </div>
                 </div>
-                <MetricToggle value={metric} onChange={setMetric} />
+                <div className="scroll-x"><GscTrendChart daily={chartDaily} metrics={tab.metrics} width={860} height={190} /></div>
               </div>
-              <div className="scroll-x"><GscTrendChart daily={daily} metrics={tab.metrics} width={860} height={190} /></div>
-            </div>
-          )}
+            );
+          })()}
           <GscQueriesTable queries={data.queries || []} title="Top queries — last 28 days" />
         </>
       );
