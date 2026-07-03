@@ -1,11 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { StickyNote, Phone, Mail, Users, Trash2, Send, Clock, CalendarClock, Check, CalendarPlus, RefreshCw, CalendarCheck } from "lucide-react";
-import { ink, accent, tint, disp, BD, BDt, btn, input, iconBtn } from "../lib/theme";
+import { ink, accent, tint, disp, BD, BDt, btn, input, iconBtn, sel } from "../lib/theme";
 import { ACTIVITY_TYPES, activityLabel } from "../lib/constants";
 import { dateTimeLabel, localDateTimeInput, dateLabel, isPastDue } from "../lib/format";
 import { addActivity, deleteActivity, setActivityFollowup } from "../lib/api";
 import { activitiesIcs, icsEventCount, downloadIcs } from "../lib/ics";
-import { pushToCalendar, syncGmail } from "../lib/google";
+import { pushToCalendar, syncGmail, googleAccounts } from "../lib/google";
 import { useToast } from "../lib/toast";
 import { Empty } from "./ui";
 
@@ -29,7 +29,19 @@ export default function Activity({ client, activities = [], author = "", googleC
   const [followUp, setFollowUp] = useState(""); // YYYY-MM-DD; blank = no reminder
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // Connected Google accounts + which one new calendar events go to.
+  const [calAccounts, setCalAccounts] = useState([]);
+  const [calAccount, setCalAccount] = useState("");
   const toast = useToast();
+
+  useEffect(() => {
+    if (!googleConnected) { setCalAccounts([]); return; }
+    let alive = true;
+    googleAccounts()
+      .then((r) => { if (!alive) return; const a = r.accounts || []; setCalAccounts(a); setCalAccount((cur) => cur || a[0]?.account_email || ""); })
+      .catch(() => { if (alive) setCalAccounts([]); });
+    return () => { alive = false; };
+  }, [googleConnected]);
 
   const log = () => {
     if (!body.trim()) { setErr("Write something to log."); return; }
@@ -77,7 +89,7 @@ export default function Activity({ client, activities = [], author = "", googleC
   const pushCalendar = (id) => {
     setBusy(true);
     (async () => {
-      try { await pushToCalendar(id); await onChanged(); toast("Added to Google Calendar"); }
+      try { await pushToCalendar(id, calAccount); await onChanged(); toast(calAccount ? `Added to ${calAccount}'s calendar` : "Added to Google Calendar"); }
       catch (e) { toast(e?.message || "Could not add to calendar.", "error"); }
       setBusy(false);
     })();
@@ -104,6 +116,15 @@ export default function Activity({ client, activities = [], author = "", googleC
             <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>{activities.length}</span>
           )}
         </h2>
+        {googleConnected && calAccounts.length > 1 && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }} title="Which Google account's calendar new events are added to">
+            <CalendarPlus size={14} style={{ color: "#6b6580" }} />
+            <select aria-label="Calendar account" value={calAccount} onChange={(e) => setCalAccount(e.target.value)}
+              style={{ ...sel, flex: "none", minWidth: 0, maxWidth: 220, padding: "7px 10px", fontSize: 12, fontWeight: 800 }}>
+              {calAccounts.map((a) => <option key={a.account_email} value={a.account_email}>{a.account_email}</option>)}
+            </select>
+          </span>
+        )}
         {googleConnected && client.email && (
           <button style={{ ...btn("#fff", ink), padding: "8px 12px", fontSize: 12.5 }} disabled={busy}
             title={`Import recent Gmail with ${client.email}`} onClick={gmailSync}>

@@ -61,23 +61,34 @@ function ImportModal({ imported, onAdded, onClose }) {
   useEffect(() => {
     let alive = true;
     gscSites()
-      .then((r) => { if (alive) setAvailable((r.sites || []).map((s) => s.site_url)); })
+      .then((r) => {
+        if (!alive) return;
+        // Sites can arrive from several connected accounts. Keep one row per
+        // site_url (the first account that can read it), tagged with its account.
+        const byUrl = new Map();
+        for (const s of r.sites || []) {
+          if (!byUrl.has(s.site_url)) byUrl.set(s.site_url, { site_url: s.site_url, account_email: s.account_email || "" });
+        }
+        setAvailable([...byUrl.values()]);
+      })
       .catch((e) => { if (alive) { setAvailable([]); toast(e?.message || "Could not list your Search Console sites.", "error"); } });
     return () => { alive = false; };
   }, []);
 
   const add = async (site) => {
-    setBusySite(site);
+    setBusySite(site.site_url);
     try {
-      await gscSiteAdd(site);
-      setAdded((s) => new Set(s).add(site));
-      onAdded(site);
+      await gscSiteAdd(site.site_url, site.account_email);
+      setAdded((s) => new Set(s).add(site.site_url));
+      onAdded(site.site_url);
       toast("Website imported");
     } catch (e) { toast(e?.message || "Could not import the site.", "error"); }
     setBusySite("");
   };
 
-  const candidates = (available || []).filter((s) => !imported.includes(s) || added.has(s));
+  const candidates = (available || []).filter((s) => !imported.includes(s.site_url) || added.has(s.site_url));
+  // Show the source account under each site only when more than one is connected.
+  const multiAccount = new Set((available || []).map((s) => s.account_email).filter(Boolean)).size > 1;
 
   return (
     <Modal title="Import a website" onClose={onClose} maxWidth={520}>
@@ -91,16 +102,21 @@ function ImportModal({ imported, onAdded, onClose }) {
       ) : (
         <div style={{ border: BDt, borderRadius: 10, overflow: "hidden" }}>
           {candidates.map((site) => {
-            const done = added.has(site);
+            const done = added.has(site.site_url);
             return (
-              <div key={site} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #f0ece2" }}>
+              <div key={site.site_url} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #f0ece2" }}>
                 <Globe size={15} style={{ color: accent, flexShrink: 0 }} />
-                <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 800, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{site}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{site.site_url}</div>
+                  {multiAccount && site.account_email && (
+                    <div style={{ fontSize: 11, color: GSC_GRAY, fontWeight: 700, marginTop: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{site.account_email}</div>
+                  )}
+                </div>
                 {done ? (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 800, color: "#1f9d57" }}><Check size={14} /> Added</span>
                 ) : (
-                  <button style={{ ...btn(accent, "#fff"), padding: "6px 12px", fontSize: 12 }} disabled={busySite === site} onClick={() => add(site)}>
-                    {busySite === site ? <Loader size={13} className="spin" /> : <Plus size={13} />} Add
+                  <button style={{ ...btn(accent, "#fff"), padding: "6px 12px", fontSize: 12 }} disabled={busySite === site.site_url} onClick={() => add(site)}>
+                    {busySite === site.site_url ? <Loader size={13} className="spin" /> : <Plus size={13} />} Add
                   </button>
                 )}
               </div>

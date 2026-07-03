@@ -186,6 +186,9 @@ async function ensureSchema(sql) {
   // browser. user_id is text (not a FK) on purpose: the users table belongs to
   // data.js and may not exist yet when this handler runs first on a fresh
   // database; rows are removed on disconnect and on user deletion.
+  // This single-row-per-user table remains the PRIMARY connection that powers
+  // Gmail (and Calendar when no specific account is chosen); the multi-account
+  // table below layers additional connected accounts on top of it.
   await sql`create table if not exists user_google_tokens (
     user_id text primary key,
     access_token text default '',
@@ -195,6 +198,33 @@ async function ensureSchema(sql) {
     account_email text default '',
     updated_at timestamptz default now()
   )`;
+  // Multiple Google accounts per app user: one row per (user, Google account).
+  // Additive — user_google_tokens stays as the primary. Search Console imports
+  // and Calendar pushes can target any of these accounts. Keyed by
+  // account_email (the connect flow always requests the email scope, so it's
+  // reliably populated), so no pgcrypto/uuid dependency is needed here.
+  await sql`create table if not exists user_google_accounts (
+    user_id text not null,
+    account_email text not null,
+    google_sub text default '',
+    access_token text default '',
+    refresh_token text default '',
+    token_expiry timestamptz,
+    scope text default '',
+    created_at timestamptz default now(),
+    updated_at timestamptz default now(),
+    primary key (user_id, account_email)
+  )`;
+  // Backfill existing single connections so they appear as accounts (idempotent).
+  await sql`insert into user_google_accounts (user_id, account_email, access_token, refresh_token, token_expiry, scope)
+    select user_id, account_email, access_token, refresh_token, token_expiry, scope
+    from user_google_tokens
+    where coalesce(account_email, '') <> '' and coalesce(refresh_token, '') <> ''
+    on conflict (user_id, account_email) do nothing`;
+  // Which connected Google account owns each imported site. Empty on pre-upgrade
+  // rows → they fall back to the user's primary token, so existing imports keep
+  // working untouched.
+  await sql`alter table user_gsc_sites add column if not exists account_email text default ''`;
   // Google SSO identity on user accounts. Added HERE (not in data.js) because
   // data.js's ensureSchema fast-paths out on existing databases, so its ALTERs
   // never run there; `if exists` covers a fresh DB where users doesn't exist yet.
@@ -272,6 +302,51 @@ async function getUserAccessToken(sql, userId) {
   return freshUserToken(sql, userId, rows[0]);
 }
 
+// Valid access token for a SPECIFIC connected Google account (multi-account),
+// refreshing within 60s of expiry.
+async function freshAccountToken(sql, userId, accountEmail, row) {
+  const expMs = row.token_expiry ? new Date(row.token_expiry).getTime() : 0;
+  if (row.access_token && expMs - Date.now() > 60_000) return row.access_token;
+  const { token, expiry } = await refreshedToken(row.refresh_token);
+  await sql`update user_google_accounts set access_token=${token}, token_expiry=${expiry}, updated_at=now()
+    where user_id=${userId} and account_email=${accountEmail}`;
+  return token;
+}
+
+// Access token for one of the user's connected accounts. When accountEmail is
+// blank (legacy imports / single-account installs), fall back to the primary
+// user_google_tokens connection so nothing that worked before breaks.
+async function getAccountAccessToken(sql, userId, accountEmail) {
+  const email = String(accountEmail || "").trim();
+  if (!email) return getUserAccessToken(sql, userId);
+  const rows = userId
+    ? await sql`select access_token, refresh_token, token_expiry from user_google_accounts
+        where user_id=${userId} and account_email=${email} limit 1`
+    : [];
+  if (!rows.length || !rows[0].refresh_token) {
+    // The account was disconnected — fall back to the primary connection.
+    return getUserAccessToken(sql, userId);
+  }
+  return freshAccountToken(sql, userId, email, rows[0]);
+}
+
+// Every connected Google account for a user (primary + extras), newest first.
+// De-duped by email; the primary row is always included even if the backfill
+// hasn't run for it yet.
+async function listUserAccounts(sql, userId) {
+  if (!userId) return [];
+  const rows = await sql`select account_email, updated_at, refresh_token from user_google_accounts
+    where user_id=${userId} and coalesce(refresh_token,'') <> '' order by updated_at desc`;
+  const seen = new Set(rows.map((r) => r.account_email));
+  const primary = await sql`select account_email, updated_at from user_google_tokens
+    where user_id=${userId} and coalesce(refresh_token,'') <> '' limit 1`;
+  const out = rows.map((r) => ({ account_email: r.account_email, updated_at: r.updated_at }));
+  if (primary.length && primary[0].account_email && !seen.has(primary[0].account_email)) {
+    out.push({ account_email: primary[0].account_email, updated_at: primary[0].updated_at });
+  }
+  return out;
+}
+
 // Return a currently-valid access token for this session, refreshing when
 // within 60s of expiry. The CURRENT USER's connection wins; the legacy
 // workspace-wide row is the fallback so existing installs keep working.
@@ -332,12 +407,13 @@ const GSC_DAILY_WINDOW = 365;
 // with the OWNER user's token when stale. Shape matches what the frontend's
 // organic panels already consume: {daily, queries, month} (month is null —
 // per-user queries are a rolling 28-day window, not calendar-month buckets).
-async function gscSiteData(sql, ownerUserId, siteUrl, force = false) {
+async function gscSiteData(sql, ownerUserId, siteUrl, force = false, accountEmail = "") {
   const cached = await sql`select payload, fetched_at from gsc_cache where site_url=${siteUrl} limit 1`;
   if (!force && cached.length && Date.now() - new Date(cached[0].fetched_at).getTime() < GSC_CACHE_TTL_MS) {
     try { return JSON.parse(cached[0].payload); } catch { /* corrupt — refetch */ }
   }
-  const token = await getUserAccessToken(sql, ownerUserId);
+  // Use the token of the account that owns this site; blank → primary (legacy).
+  const token = await getAccountAccessToken(sql, ownerUserId, accountEmail);
   const [dailyRows, queryRows] = await Promise.all([
     gscSearchAnalytics(token, siteUrl, { startDate: gscDaysAgo(GSC_DAILY_WINDOW), endDate: gscDaysAgo(1), dimensions: ["date"], rowLimit: 500 }),
     gscSearchAnalytics(token, siteUrl, { startDate: gscDaysAgo(28), endDate: gscDaysAgo(1), dimensions: ["query"], rowLimit: 15 }),
@@ -456,12 +532,25 @@ export default async (req) => {
         // this response omits it.
         const userId = String(st[0].user_id || "");
         if (!userId) return redirect(appOrigin + "/?google=error");
+        // Primary connection (powers Gmail + the default calendar): latest
+        // connect wins, matching the pre-multi-account behavior.
         await sql`insert into user_google_tokens (user_id, access_token, refresh_token, token_expiry, scope, account_email, updated_at)
           values (${userId}, ${tok.access_token}, ${tok.refresh_token || ""}, ${expiry}, ${tok.scope || ""}, ${email}, now())
           on conflict (user_id) do update set
             access_token=excluded.access_token,
             refresh_token=case when excluded.refresh_token <> '' then excluded.refresh_token else user_google_tokens.refresh_token end,
             token_expiry=excluded.token_expiry, scope=excluded.scope, account_email=excluded.account_email, updated_at=now()`;
+        // Also record it as one of the user's connected accounts (multi-account).
+        // Needs an email to key on; without one it still lives as the primary.
+        if (email) {
+          await sql`insert into user_google_accounts (user_id, account_email, google_sub, access_token, refresh_token, token_expiry, scope, updated_at)
+            values (${userId}, ${email}, ${sub}, ${tok.access_token}, ${tok.refresh_token || ""}, ${expiry}, ${tok.scope || ""}, now())
+            on conflict (user_id, account_email) do update set
+              google_sub=case when excluded.google_sub <> '' then excluded.google_sub else user_google_accounts.google_sub end,
+              access_token=excluded.access_token,
+              refresh_token=case when excluded.refresh_token <> '' then excluded.refresh_token else user_google_accounts.refresh_token end,
+              token_expiry=excluded.token_expiry, scope=excluded.scope, updated_at=now()`;
+        }
         return redirect(appOrigin + "/?google=connected");
       }
 
@@ -568,7 +657,10 @@ export default async (req) => {
           redirect_uri: redirectUri(req),
           response_type: "code",
           access_type: "offline",
-          prompt: "consent",
+          // select_account lets the user pick a DIFFERENT Google account when
+          // adding another connection (not silently reuse the signed-in one);
+          // consent ensures a refresh_token is returned.
+          prompt: "select_account consent",
           include_granted_scopes: "true",
           scope: CONNECT_SCOPES.join(" "),
           state,
@@ -589,17 +681,50 @@ export default async (req) => {
 
       /* ---------- Search Console (per-user) ---------- */
 
+      case "googleAccounts": {
+        // Every Google account this user has connected (for Settings + pickers).
+        return json({ accounts: await listUserAccounts(sql, auth.userId) });
+      }
+
+      case "googleDisconnectAccount": {
+        // Disconnect ONE connected Google account (multi-account). Its imported
+        // sites go with it (they can't be fetched without the token). If it was
+        // the primary connection, clear that too so Gmail/Calendar reflect it.
+        if (!auth.userId) return json({ error: "This session has no personal Google connection." }, 400);
+        const email = String(payload.account_email || "").trim();
+        if (!email) return json({ error: "Missing account." }, 400);
+        await sql`delete from user_google_accounts where user_id=${auth.userId} and account_email=${email}`;
+        await sql`delete from user_gsc_sites where user_id=${auth.userId} and account_email=${email}`;
+        await sql`delete from user_google_tokens where user_id=${auth.userId} and account_email=${email}`;
+        return json({ ok: true });
+      }
+
       case "gscSites": {
-        // The CURRENT user's verified Search Console properties (live from
-        // Google — used by pickers, so it should never be stale).
-        const token = await getUserAccessToken(sql, auth.userId);
-        return json({ sites: await gscListSites(token) });
+        // The user's verified Search Console properties across ALL connected
+        // accounts (live from Google — used by the import picker). Each entry is
+        // tagged with the account it came from; a failing account is skipped so
+        // one bad token doesn't blank the whole list.
+        const accounts = await listUserAccounts(sql, auth.userId);
+        if (!accounts.length) {
+          // No multi-account rows yet → fall back to the primary connection.
+          const token = await getUserAccessToken(sql, auth.userId);
+          const sites = await gscListSites(token);
+          return json({ sites: sites.map((s) => ({ ...s, account_email: "" })) });
+        }
+        const perAccount = await Promise.all(accounts.map(async (a) => {
+          try {
+            const token = await getAccountAccessToken(sql, auth.userId, a.account_email);
+            const sites = await gscListSites(token);
+            return sites.map((s) => ({ ...s, account_email: a.account_email }));
+          } catch { return []; }
+        }));
+        return json({ sites: perAccount.flat() });
       }
 
       case "gscSiteList": {
         // Sites the current user imported into their Websites dashboard.
         if (!auth.userId) return json({ sites: [] });
-        const sites = await sql`select site_url, added_at from user_gsc_sites where user_id=${auth.userId} order by site_url`;
+        const sites = await sql`select site_url, added_at, account_email from user_gsc_sites where user_id=${auth.userId} order by site_url`;
         return json({ sites });
       }
 
@@ -607,11 +732,15 @@ export default async (req) => {
         const siteUrl = String(payload.site_url || "").trim();
         if (!siteUrl) return json({ error: "Missing site URL." }, 400);
         if (!auth.userId) return json({ error: "Sign in with your personal account (My account or Google) first." }, 400);
-        // Only sites actually on the user's Search Console account.
-        const token = await getUserAccessToken(sql, auth.userId);
+        // Validate against the chosen account (or the primary when unspecified),
+        // and remember which account owns the site so its data fetches use the
+        // right token.
+        const accountEmail = String(payload.account_email || "").trim();
+        const token = await getAccountAccessToken(sql, auth.userId, accountEmail);
         const sites = await gscListSites(token);
-        if (!sites.some((s) => s.site_url === siteUrl)) return json({ error: "That site isn't on your Search Console account." }, 400);
-        await sql`insert into user_gsc_sites (user_id, site_url) values (${auth.userId}, ${siteUrl}) on conflict do nothing`;
+        if (!sites.some((s) => s.site_url === siteUrl)) return json({ error: "That site isn't on the selected Search Console account." }, 400);
+        await sql`insert into user_gsc_sites (user_id, site_url, account_email) values (${auth.userId}, ${siteUrl}, ${accountEmail})
+          on conflict (user_id, site_url) do update set account_email=excluded.account_email`;
         return json({ ok: true });
       }
 
@@ -623,13 +752,14 @@ export default async (req) => {
 
       case "gscSiteData": {
         // Search Analytics for one of the current user's imported sites
-        // (cached per site; at most two Google calls when stale).
+        // (cached per site; at most two Google calls when stale). Fetched with
+        // the token of the account that owns the site.
         const siteUrl = String(payload.site_url || "").trim();
         if (!siteUrl) return json({ error: "Missing site URL." }, 400);
         if (!auth.userId) return json({ error: "Sign in with your personal account first." }, 400);
-        const mine = await sql`select site_url from user_gsc_sites where user_id=${auth.userId} and site_url=${siteUrl} limit 1`;
+        const mine = await sql`select site_url, account_email from user_gsc_sites where user_id=${auth.userId} and site_url=${siteUrl} limit 1`;
         if (!mine.length) return json({ error: "Import this site on the Websites tab first." }, 404);
-        const data = await gscSiteData(sql, auth.userId, siteUrl, Boolean(payload.force));
+        const data = await gscSiteData(sql, auth.userId, siteUrl, Boolean(payload.force), mine[0].account_email);
         return json(data);
       }
 
@@ -697,7 +827,12 @@ export default async (req) => {
         if (!a.follow_up_date && !(a.type === "meeting" && a.happened_at)) {
           return json({ error: "Only follow-ups and meetings can go on the calendar." }, 400);
         }
-        const token = await getAccessToken(sql, auth.userId);
+        // Push to the chosen connected account's calendar when one is given
+        // (multi-account); otherwise the session's primary/workspace calendar.
+        const acctEmail = String(payload.account_email || "").trim();
+        const token = acctEmail
+          ? await getAccountAccessToken(sql, auth.userId, acctEmail)
+          : await getAccessToken(sql, auth.userId);
         const evt = eventBody(a, a.client_name);
         const base = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
         let saved;

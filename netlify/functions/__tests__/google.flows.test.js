@@ -10,8 +10,10 @@ const store = {
   states: new Map(),        // state -> { flow, user_id, app_origin }
   users: [],                // { id, name, email, role, active, google_sub, google_email }
   userTokens: new Map(),    // user_id -> { access_token, refresh_token, token_expiry, account_email }
+  userAccounts: new Map(),  // user_id -> Map(account_email -> row)   (user_google_accounts)
   integrations: null,       // workspace row or null
   userSites: new Map(),     // user_id -> Set(site_url)   (user_gsc_sites)
+  siteAccounts: new Map(),  // "user_id|site_url" -> account_email   (user_gsc_sites.account_email)
   clientSites: new Map(),   // client_id -> { site_url, user_id }   (client_gsc_sites)
   gscCache: new Map(),      // site_url -> { payload, fetched_at }
   gscDaily: [],             // service-account fallback rows
@@ -53,10 +55,39 @@ function sqlMock(strings, ...values) {
     store.userTokens.set(values[0], { access_token: values[1], refresh_token: values[2], token_expiry: values[3], account_email: values[5] });
     return Promise.resolve([]);
   }
-  if (q("delete from user_google_tokens")) { store.userTokens.delete(values[0]); return Promise.resolve([]); }
+  if (q("delete from user_google_tokens")) {
+    // delete ... where user_id=$1 [and account_email=$2]
+    if (values.length > 1) { const r = store.userTokens.get(values[0]); if (r && r.account_email === values[1]) store.userTokens.delete(values[0]); }
+    else store.userTokens.delete(values[0]);
+    return Promise.resolve([]);
+  }
   if (q("from user_google_tokens where user_id=")) {
     const row = store.userTokens.get(values[0]);
     return Promise.resolve(row ? [{ ...row, updated_at: "2026-01-01" }] : []);
+  }
+  /* ---- user_google_accounts (multi-account) ---- */
+  if (q("insert into user_google_accounts") && q("from user_google_tokens")) return Promise.resolve([]); // backfill
+  if (q("insert into user_google_accounts")) {
+    // (user_id, account_email, google_sub, access_token, refresh_token, token_expiry, scope)
+    const [uid, email, sub, at, rt, exp, scope] = values;
+    if (!store.userAccounts.has(uid)) store.userAccounts.set(uid, new Map());
+    store.userAccounts.get(uid).set(email, { account_email: email, google_sub: sub, access_token: at, refresh_token: rt, token_expiry: exp, scope, updated_at: "2026-01-02" });
+    return Promise.resolve([]);
+  }
+  if (q("update user_google_accounts set access_token=")) {
+    // set access_token=$1, token_expiry=$2 where user_id=$3 and account_email=$4
+    const row = store.userAccounts.get(values[2])?.get(values[3]);
+    if (row) { row.access_token = values[0]; row.token_expiry = values[1]; }
+    return Promise.resolve([]);
+  }
+  if (q("delete from user_google_accounts")) { store.userAccounts.get(values[0])?.delete(values[1]); return Promise.resolve([]); }
+  if (q("from user_google_accounts where user_id=") && q("and account_email=")) {
+    const row = store.userAccounts.get(values[0])?.get(values[1]);
+    return Promise.resolve(row ? [row] : []);
+  }
+  if (q("from user_google_accounts where user_id=")) { // listUserAccounts (refresh_token present, newest first)
+    const rows = [...(store.userAccounts.get(values[0])?.values() || [])].filter((r) => r.refresh_token);
+    return Promise.resolve(rows.map((r) => ({ account_email: r.account_email, updated_at: r.updated_at, refresh_token: r.refresh_token })));
   }
   if (q("from integrations where provider=")) {
     return Promise.resolve(store.integrations ? [{ ...store.integrations, updated_at: "2026-01-01" }] : []);
@@ -68,16 +99,25 @@ function sqlMock(strings, ...values) {
   if (q("delete from integrations")) { store.integrations = null; return Promise.resolve([]); }
   /* ---- Search Console tables ---- */
   if (q("insert into user_gsc_sites")) {
+    // (user_id, site_url, account_email)
     if (!store.userSites.has(values[0])) store.userSites.set(values[0], new Set());
     store.userSites.get(values[0]).add(values[1]);
+    store.siteAccounts.set(`${values[0]}|${values[1]}`, values[2] || "");
     return Promise.resolve([]);
   }
-  if (q("delete from user_gsc_sites")) { store.userSites.get(values[0])?.delete(values[1]); return Promise.resolve([]); }
-  if (q("select site_url, added_at from user_gsc_sites")) {
-    return Promise.resolve([...(store.userSites.get(values[0]) || [])].sort().map((s) => ({ site_url: s, added_at: "2026-01-01" })));
+  if (q("delete from user_gsc_sites")) {
+    if (q("and account_email=")) {
+      // Remove every site the disconnected account owned.
+      const set = store.userSites.get(values[0]);
+      if (set) for (const s of [...set]) if ((store.siteAccounts.get(`${values[0]}|${s}`) || "") === values[1]) set.delete(s);
+    } else store.userSites.get(values[0])?.delete(values[1]);
+    return Promise.resolve([]);
   }
-  if (q("select site_url from user_gsc_sites")) {
-    return Promise.resolve(store.userSites.get(values[0])?.has(values[1]) ? [{ site_url: values[1] }] : []);
+  if (q("added_at, account_email from user_gsc_sites")) { // gscSiteList
+    return Promise.resolve([...(store.userSites.get(values[0]) || [])].sort().map((s) => ({ site_url: s, added_at: "2026-01-01", account_email: store.siteAccounts.get(`${values[0]}|${s}`) || "" })));
+  }
+  if (q("from user_gsc_sites where user_id=") && q("and site_url=")) { // gscSiteData ownership lookup
+    return Promise.resolve(store.userSites.get(values[0])?.has(values[1]) ? [{ site_url: values[1], account_email: store.siteAccounts.get(`${values[0]}|${values[1]}`) || "" }] : []);
   }
   if (q("insert into client_gsc_sites")) {
     store.clientSites.set(values[0], { site_url: values[1], user_id: values[2] });
@@ -153,8 +193,10 @@ beforeEach(() => {
   delete process.env.GOOGLE_REDIRECT_URI;
   store.states.clear();
   store.userTokens.clear();
+  store.userAccounts.clear();
   store.integrations = null;
   store.userSites.clear();
+  store.siteAccounts.clear();
   store.clientSites.clear();
   store.gscCache.clear();
   store.gscDaily = [];
@@ -359,5 +401,63 @@ describe("Per-user Search Console", () => {
     await post("gscDetach", { client_id: "client-9" }, bearer("user-1"));
     const data = await (await post("gscClientData", { client_id: "client-9" }, bearer("user-1"))).json();
     expect(data.source).toBe("service");
+  });
+});
+
+describe("Multiple Google accounts", () => {
+  const valid = () => new Date(Date.now() + 3600_000).toISOString();
+  // Connect a specific Google account (multi-account row) for a user.
+  const addAccount = (userId, email) => {
+    if (!store.userAccounts.has(userId)) store.userAccounts.set(userId, new Map());
+    store.userAccounts.get(userId).set(email, { account_email: email, google_sub: "", access_token: "at-live", refresh_token: "rt-live", token_expiry: valid(), scope: "", updated_at: "2026-01-02" });
+  };
+
+  it("connecting a second account keeps both in user_google_accounts + latest as primary", async () => {
+    // First account.
+    googleAccount.email = "one@agency.com"; googleAccount.id = "sub-1";
+    let start = await (await post("authUrl", { app_origin: APP }, bearer("user-1"))).json();
+    await handler(new Request(`${API}/api/google?code=abc&state=${new URL(start.url).searchParams.get("state")}`));
+    // Second account.
+    googleAccount.email = "two@agency.com"; googleAccount.id = "sub-2";
+    start = await (await post("authUrl", { app_origin: APP }, bearer("user-1"))).json();
+    await handler(new Request(`${API}/api/google?code=abc&state=${new URL(start.url).searchParams.get("state")}`));
+
+    const emails = [...store.userAccounts.get("user-1").keys()].sort();
+    expect(emails).toEqual(["one@agency.com", "two@agency.com"]);
+    // Primary (Gmail/Calendar) is the most-recently connected.
+    expect(store.userTokens.get("user-1").account_email).toBe("two@agency.com");
+    googleAccount.email = "nik@agency.com"; googleAccount.id = "sub-123";
+  });
+
+  it("authUrl uses select_account so a different Google account can be added", async () => {
+    const { url } = await (await post("authUrl", { app_origin: APP }, bearer("user-1"))).json();
+    expect(new URL(url).searchParams.get("prompt")).toContain("select_account");
+  });
+
+  it("googleAccounts lists every connected account", async () => {
+    addAccount("user-1", "one@agency.com");
+    addAccount("user-1", "two@agency.com");
+    const { accounts } = await (await post("googleAccounts", {}, bearer("user-1"))).json();
+    expect(accounts.map((a) => a.account_email).sort()).toEqual(["one@agency.com", "two@agency.com"]);
+  });
+
+  it("gscSites spans all connected accounts, tagging each site with its account", async () => {
+    addAccount("user-1", "one@agency.com");
+    const { sites } = await (await post("gscSites", {}, bearer("user-1"))).json();
+    // Every returned site is tagged with the account it came from.
+    expect(sites.every((s) => s.account_email === "one@agency.com")).toBe(true);
+    expect(sites.map((s) => s.site_url)).toContain("sc-domain:zetadental.com");
+  });
+
+  it("gscSiteAdd records the chosen account; disconnecting it removes the account and its sites", async () => {
+    addAccount("user-1", "one@agency.com");
+    const ok = await post("gscSiteAdd", { site_url: "sc-domain:zetadental.com", account_email: "one@agency.com" }, bearer("user-1"));
+    expect(ok.status).toBe(200);
+    expect(store.siteAccounts.get("user-1|sc-domain:zetadental.com")).toBe("one@agency.com");
+
+    const gone = await post("googleDisconnectAccount", { account_email: "one@agency.com" }, bearer("user-1"));
+    expect(gone.status).toBe(200);
+    expect(store.userAccounts.get("user-1").has("one@agency.com")).toBe(false);
+    expect(store.userSites.get("user-1")?.has("sc-domain:zetadental.com")).toBe(false);
   });
 });
