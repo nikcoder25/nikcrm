@@ -30,7 +30,7 @@ const json = (obj, status = 200) =>
 // once `clients` existed, so later ALTERs silently never reached live
 // databases. Deltas stay small on purpose — a migration run must fit inside
 // Cloudflare's per-invocation subrequest budget alongside the actual request.
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 async function runMigrations(sql, from) {
   if (from < 2) {
@@ -64,6 +64,12 @@ async function runMigrations(sql, from) {
     // v4: per-order project price. Admin-only — the API never returns it to
     // non-admins and only admins can set it (see load/orderCreate/orderUpdate).
     await sql`alter table orders add column if not exists price numeric default 0`;
+  }
+  if (from < 5) {
+    // v5: reference links per order (the "doc file" / "google sheet" columns
+    // from the team's order spreadsheet). Both are optional http(s) URLs.
+    await sql`alter table orders add column if not exists doc_file text default ''`;
+    await sql`alter table orders add column if not exists google_sheet text default ''`;
   }
   await sql`insert into schema_meta (id, version) values (1, ${SCHEMA_VERSION})
     on conflict (id) do update set version=${SCHEMA_VERSION}`;
@@ -1269,14 +1275,65 @@ export default async (req) => {
         if (bad) return bad;
         const website = safeHttpUrl(o.website);
         if (website === null) return json({ error: "Website link must be an http(s) URL (or blank)." }, 400);
+        const docFile = safeHttpUrl(o.doc_file);
+        if (docFile === null) return json({ error: "Doc file link must be an http(s) URL (or blank)." }, 400);
+        const googleSheet = safeHttpUrl(o.google_sheet);
+        if (googleSheet === null) return json({ error: "Google sheet link must be an http(s) URL (or blank)." }, 400);
         // Only an admin may set the project price; anyone else creates it at 0.
         const price = isAdmin ? (Number(o.price) || 0) : 0;
-        await sql`insert into orders (name, status, start_date, end_date, delivery_time, person, website, order_data, price, created_by)
+        await sql`insert into orders (name, status, start_date, end_date, delivery_time, person, website, order_data, price, doc_file, google_sheet, created_by)
           values (${String(o.name).trim()}, ${o.status || "not_started"}, ${o.start_date || null}, ${o.end_date || null},
                   ${o.delivery_time || ""}, ${o.person || ""}, ${website}, ${o.order_data || ""}, ${price},
-                  ${auth.name || o.created_by || ""})`;
+                  ${docFile}, ${googleSheet}, ${auth.name || o.created_by || ""})`;
         await logActivity(sql, { actor, verb: "added order", entity: "order", entity_label: String(o.name).trim() });
         return json({ ok: true });
+      }
+
+      case "ordersBulkImport": {
+        // Insert many orders in one round trip (spreadsheet/CSV import). Each
+        // row is sanitised individually; unparseable URLs are dropped to blank
+        // rather than failing the whole batch. Rows without a name are skipped.
+        const rows = Array.isArray(payload.orders) ? payload.orders : [];
+        if (!rows.length) return json({ error: "Nothing to import." }, 400);
+        if (rows.length > 500) return json({ error: "Too many rows — import up to 500 at a time." }, 400);
+        const clean = [];
+        for (const o of rows) {
+          const name = String(o?.name || "").trim();
+          if (!name) continue;
+          const status = ORDER_STATE_KEYS.includes(o.status) ? o.status : "not_started";
+          const url = (v) => { const u = safeHttpUrl(v); return u === null ? "" : u; };
+          clean.push({
+            name, status,
+            start_date: o.start_date || null,
+            end_date: o.end_date || null,
+            delivery_time: String(o.delivery_time || ""),
+            person: String(o.person || ""),
+            website: url(o.website),
+            order_data: String(o.order_data || ""),
+            doc_file: url(o.doc_file),
+            google_sheet: url(o.google_sheet),
+          });
+        }
+        if (!clean.length) return json({ error: "No rows had an order name." }, 400);
+        const by = auth.name || "";
+        // One multi-row insert via unnest() so a large import stays a single
+        // subrequest (Cloudflare's per-invocation budget is tight).
+        await sql`insert into orders (name, status, start_date, end_date, delivery_time, person, website, order_data, doc_file, google_sheet, created_by)
+          select * from unnest(
+            ${clean.map((o) => o.name)}::text[],
+            ${clean.map((o) => o.status)}::text[],
+            ${clean.map((o) => o.start_date)}::date[],
+            ${clean.map((o) => o.end_date)}::date[],
+            ${clean.map((o) => o.delivery_time)}::text[],
+            ${clean.map((o) => o.person)}::text[],
+            ${clean.map((o) => o.website)}::text[],
+            ${clean.map((o) => o.order_data)}::text[],
+            ${clean.map((o) => o.doc_file)}::text[],
+            ${clean.map((o) => o.google_sheet)}::text[],
+            ${clean.map(() => by)}::text[]
+          )`;
+        await logActivity(sql, { actor, verb: `imported ${clean.length} order${clean.length === 1 ? "" : "s"}`, entity: "order", entity_label: `${clean.length} rows` });
+        return json({ ok: true, created: clean.length });
       }
 
       case "orderUpdate": {
@@ -1287,13 +1344,18 @@ export default async (req) => {
         if (bad) return bad;
         const website = safeHttpUrl(o.website);
         if (website === null) return json({ error: "Website link must be an http(s) URL (or blank)." }, 400);
+        const docFile = safeHttpUrl(o.doc_file);
+        if (docFile === null) return json({ error: "Doc file link must be an http(s) URL (or blank)." }, 400);
+        const googleSheet = safeHttpUrl(o.google_sheet);
+        if (googleSheet === null) return json({ error: "Google sheet link must be an http(s) URL (or blank)." }, 400);
         // Shared fields anyone may edit. The price is admin-only: a non-admin
         // update leaves the stored price untouched (never trusts the payload).
         await sql`update orders set
           name=${String(o.name).trim()}, status=${o.status || "not_started"},
           start_date=${o.start_date || null}, end_date=${o.end_date || null},
           delivery_time=${o.delivery_time || ""}, person=${o.person || ""},
-          website=${website}, order_data=${o.order_data || ""}
+          website=${website}, order_data=${o.order_data || ""},
+          doc_file=${docFile}, google_sheet=${googleSheet}
           where id=${o.id}`;
         if (isAdmin) {
           await sql`update orders set price=${Number(o.price) || 0} where id=${o.id}`;

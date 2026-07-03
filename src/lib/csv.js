@@ -100,6 +100,8 @@ export const ordersCsv = (orders, withPrice = false) => toCsv(orders, [
   { header: "Website", value: (o) => o.website || "" },
   { header: "Order Data", value: (o) => o.order_data || "" },
   ...(withPrice ? [{ header: "Price", value: (o) => (o.price == null ? "" : o.price) }] : []),
+  { header: "Doc File", value: (o) => o.doc_file || "" },
+  { header: "Google Sheet", value: (o) => o.google_sheet || "" },
 ]);
 
 export const aiCitationsCsv = (citations, clients) => {

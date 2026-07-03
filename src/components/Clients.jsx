@@ -65,9 +65,11 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
     return m;
   }, [deliverables]);
 
-  const cell = { fontSize: 12.5, fontWeight: 700, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" };
-  const th = { fontSize: 10.5, fontWeight: 800, color: GRAY, textTransform: "uppercase", letterSpacing: "0.04em" };
-  const GRID = "minmax(150px,1.6fr) 96px 120px minmax(90px,1fr) 96px 90px 82px minmax(110px,1fr) 96px 96px 80px 108px 74px";
+  const cell = { fontSize: 12.5, fontWeight: 700, minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" };
+  const th = { fontSize: 10.5, fontWeight: 800, color: GRAY, textTransform: "uppercase", letterSpacing: "0.04em", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" };
+  // All columns are fluid (minmax(0,…fr)) so the table always fits its container
+  // width — no horizontal scroll. Cells clip with ellipsis when space is tight.
+  const GRID = "minmax(0,1.7fr) minmax(0,0.95fr) minmax(0,1.15fr) minmax(0,1fr) minmax(0,0.95fr) minmax(0,0.85fr) minmax(0,0.7fr) minmax(0,1fr) minmax(0,0.85fr) minmax(0,0.9fr) minmax(0,0.75fr) minmax(0,0.95fr) 66px";
 
   return (
     <div>
@@ -105,9 +107,9 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
         </Empty></Panel>
       ) : filtered.length === 0 ? <Panel><Empty>No clients match your search.</Empty></Panel> : (
     <Panel>
-      <div className="scroll-x">
-        <div style={{ minWidth: 1360 }}>
-          <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 10, alignItems: "center", padding: "12px 20px", borderBottom: "2px solid #f0ece2" }}>
+      <div>
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 8, alignItems: "center", padding: "12px 16px", borderBottom: "2px solid #f0ece2" }}>
             <span style={th}>Name</span>
             <span style={th}>Status</span>
             <span style={th}>Health</span>
@@ -126,7 +128,7 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
             const dels = delsByClient.get(c.id);
             const risk = RISK_STYLE[c.risk];
             return (
-              <div key={c.id} style={{ display: "grid", gridTemplateColumns: GRID, gap: 10, alignItems: "center", padding: "11px 20px", borderBottom: "1px solid #f0ece2" }}>
+              <div key={c.id} style={{ display: "grid", gridTemplateColumns: GRID, gap: 8, alignItems: "center", padding: "11px 16px", borderBottom: "1px solid #f0ece2" }}>
                 {/* Clicking the client opens the full detail view */}
                 <span
                   onClick={() => onOpen(c)}
@@ -135,24 +137,24 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
                 >
                   {c.name}
                 </span>
-                <span style={{ padding: "4px 9px", borderRadius: 7, fontSize: 11, fontWeight: 800, textAlign: "center", border: "2px solid " + ink, background: c.status === "active" ? accent : "#fff", color: c.status === "active" ? "#fff" : ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={STATUS_LABEL[c.status] || c.status}>
+                <span style={{ minWidth: 0, padding: "4px 6px", borderRadius: 7, fontSize: 11, fontWeight: 800, textAlign: "center", border: "2px solid " + ink, background: c.status === "active" ? accent : "#fff", color: c.status === "active" ? "#fff" : ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={STATUS_LABEL[c.status] || c.status}>
                   {STATUS_LABEL[c.status] || c.status}
                 </span>
-                <span><HealthBadge health={healthByClient.get(c.id)} size="sm" /></span>
+                <span style={{ minWidth: 0, overflow: "hidden", display: "block" }}><HealthBadge health={healthByClient.get(c.id)} size="sm" /></span>
                 <span style={{ ...cell, color: c.niche ? ink : MUTED }} title={c.niche}>{c.niche || "—"}</span>
                 <span style={{ ...cell, color: c.package ? GRAY : MUTED }} title={c.package}>{c.package || "—"}</span>
                 {c.source ? (
-                  <span style={{ fontSize: 10.5, fontWeight: 800, background: tint, color: ink, padding: "3px 9px", borderRadius: 6, border: "2px solid " + ink, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={c.source}>{c.source}</span>
+                  <span style={{ minWidth: 0, fontSize: 10.5, fontWeight: 800, background: tint, color: ink, padding: "3px 6px", borderRadius: 6, border: "2px solid " + ink, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={c.source}>{c.source}</span>
                 ) : <span style={{ ...cell, color: MUTED }}>—</span>}
                 <span style={{ ...cell, color: Number(c.fee) > 0 ? ink : MUTED }}>{Number(c.fee) > 0 ? money(c.fee) : "—"}</span>
                 <span style={{ ...cell, color: c.team_member ? ink : MUTED }} title={c.team_member}>{c.team_member || "—"}</span>
                 <span style={{ ...cell, color: c.start_month ? GRAY : MUTED }}>{c.start_month ? ymLabel(c.start_month) : "—"}</span>
                 <span style={{ ...cell, color: c.renewal_month ? GRAY : MUTED }}>{c.renewal_month ? ymLabel(c.renewal_month) : "—"}</span>
                 {risk ? (
-                  <span style={{ ...risk, padding: "3px 9px", borderRadius: 6, fontSize: 11, fontWeight: 800, textAlign: "center", textTransform: "capitalize" }}>{c.risk}</span>
+                  <span style={{ ...risk, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "3px 6px", borderRadius: 6, fontSize: 11, fontWeight: 800, textAlign: "center", textTransform: "capitalize" }}>{c.risk}</span>
                 ) : <span style={{ ...cell, color: MUTED }}>—</span>}
                 {dels && dels.total > 0 ? (
-                  <span title="Deliverables delivered / total" style={{ fontSize: 11, fontWeight: 800, background: "#fff", color: ink, padding: "4px 9px", borderRadius: 7, border: "2px solid " + ink, textAlign: "center", whiteSpace: "nowrap" }}>
+                  <span title="Deliverables delivered / total" style={{ minWidth: 0, overflow: "hidden", fontSize: 11, fontWeight: 800, background: "#fff", color: ink, padding: "4px 6px", borderRadius: 7, border: "2px solid " + ink, textAlign: "center", whiteSpace: "nowrap" }}>
                     {dels.delivered}/{dels.total}
                   </span>
                 ) : <span style={{ ...cell, color: MUTED }}>—</span>}

@@ -161,6 +161,8 @@ create table if not exists orders (
   website text default '',
   order_data text default '',              -- what was ordered, e.g. "monthly seo"
   price numeric default 0,                 -- project price; ADMIN-ONLY (never returned to non-admins)
+  doc_file text default '',                -- optional reference doc URL
+  google_sheet text default '',            -- optional reference sheet URL
   created_by text default '',
   created_at timestamptz default now()
 );
