@@ -107,6 +107,7 @@ export const loadSome = (sets) => call("loadSome", { sets });
 export const saveClient = (c) => call("clientSave", c);
 export const deleteClient = (id) => call("clientDelete", { id });
 export const addTask = (t) => call("taskAdd", t);
+export const updateTask = (t) => call("taskUpdate", t);
 export const moveTask = (id, status) => call("taskMove", { id, status });
 export const assignTask = (id, assignee) => call("taskAssign", { id, assignee });
 export const deleteTask = (id) => call("taskDelete", { id });

@@ -30,7 +30,7 @@ const json = (obj, status = 200) =>
 // once `clients` existed, so later ALTERs silently never reached live
 // databases. Deltas stay small on purpose — a migration run must fit inside
 // Cloudflare's per-invocation subrequest budget alongside the actual request.
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 async function runMigrations(sql, from) {
   if (from < 2) {
@@ -83,6 +83,11 @@ async function runMigrations(sql, from) {
     await sql`alter table clients add column if not exists google_sheet text default ''`;
     await sql`alter table clients add column if not exists canva text default ''`;
   }
+  if (from < 8) {
+    // v8: free-text task description so a card carries the full brief a
+    // teammate needs to pick it up and start.
+    await sql`alter table tasks add column if not exists description text default ''`;
+  }
   await sql`insert into schema_meta (id, version) values (1, ${SCHEMA_VERSION})
     on conflict (id) do update set version=${SCHEMA_VERSION}`;
 }
@@ -134,6 +139,7 @@ async function ensureSchema(sql) {
     assignee text default '',
     status text default 'todo',
     due date,
+    description text default '',
     created_at timestamptz default now()
   )`;
   await sql`create table if not exists payments (
@@ -1029,12 +1035,31 @@ export default async (req) => {
 
       case "taskAdd": {
         const t = payload;
+        if (!t.title || !String(t.title).trim()) return json({ error: "Type what the task is." }, 400);
         const bad = badEnum("type", t.type, TASK_TYPE_KEYS) || badEnum("status", t.status, TASK_STATE_KEYS);
         if (bad) return bad;
-        await sql`insert into tasks (client_id, title, type, assignee, status, due)
-          values (${t.client_id}, ${t.title}, ${t.type || "other"}, ${t.assignee || ""},
-                  ${t.status || "todo"}, ${t.due || null})`;
-        await logActivity(sql, { actor, verb: "added task", entity: "task", entity_label: `"${t.title}"`, client_id: t.client_id });
+        // client_id is optional — a task can be a general to-do with no client.
+        await sql`insert into tasks (client_id, title, type, assignee, status, due, description)
+          values (${t.client_id || null}, ${String(t.title).trim()}, ${t.type || "other"}, ${t.assignee || ""},
+                  ${t.status || "todo"}, ${t.due || null}, ${t.description || ""})`;
+        await logActivity(sql, { actor, verb: "added task", entity: "task", entity_label: `"${String(t.title).trim()}"`, client_id: t.client_id || null });
+        return json({ ok: true });
+      }
+
+      case "taskUpdate": {
+        // Full edit from the task detail card. All fields optional except a
+        // non-empty title; client can be cleared (general task).
+        const t = payload;
+        if (!t.id) return json({ error: "Missing task id." }, 400);
+        if (!t.title || !String(t.title).trim()) return json({ error: "Type what the task is." }, 400);
+        const bad = badEnum("type", t.type, TASK_TYPE_KEYS) || badEnum("status", t.status, TASK_STATE_KEYS);
+        if (bad) return bad;
+        const upd = await sql`update tasks set
+          client_id=${t.client_id || null}, title=${String(t.title).trim()}, type=${t.type || "other"},
+          assignee=${t.assignee || ""}, status=${t.status || "todo"}, due=${t.due || null},
+          description=${t.description || ""}
+          where id=${t.id} returning client_id`;
+        if (upd.length) await logActivity(sql, { actor, verb: "updated task", entity: "task", entity_label: `"${String(t.title).trim()}"`, client_id: upd[0].client_id });
         return json({ ok: true });
       }
 

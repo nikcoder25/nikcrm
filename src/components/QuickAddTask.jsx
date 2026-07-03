@@ -15,7 +15,6 @@ export default function QuickAddTask({ clients = [], members = [], onAdd, inputR
   const [raw, setRaw] = useState("");
   const [override, setOverride] = useState({});
   const [busy, setBusy] = useState(false);
-  const [showClientErr, setShowClientErr] = useState(false);
   const toast = useToast();
 
   const parsed = useMemo(() => parseQuickTask(raw, { clients, members }), [raw, clients, members]);
@@ -35,16 +34,16 @@ export default function QuickAddTask({ clients = [], members = [], onAdd, inputR
     onText: (t, final) => { if (final) setRaw((r) => (r ? r.trim() + " " : "") + t); },
   });
 
-  const reset = () => { setRaw(""); setOverride({}); setShowClientErr(false); };
+  const reset = () => { setRaw(""); setOverride({}); };
 
   const add = async () => {
     if (busy) return;
     const title = parsed.title.trim();
-    if (!eff.client_id) { setShowClientErr(true); toast("Pick a client for this task.", "error"); return; }
+    // Client is optional — a task can be a plain to-do. Only a title is required.
     if (!title) { toast("Type what the task is.", "error"); return; }
     setBusy(true);
     try {
-      await onAdd({ client_id: eff.client_id, title, type: eff.type, assignee: eff.assignee, status: eff.status, due: eff.due || null });
+      await onAdd({ client_id: eff.client_id || null, title, type: eff.type, assignee: eff.assignee, status: eff.status, due: eff.due || null });
       toast("Task added");
       reset();
     } catch (e) {
@@ -55,7 +54,6 @@ export default function QuickAddTask({ clients = [], members = [], onAdd, inputR
   };
 
   const chip = { fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 7, border: "2px solid " + ink, background: tint, color: ink };
-  const clientBad = showClientErr && !eff.client_id;
 
   return (
     <div style={{ background: "#fff", border: BD, borderRadius: 14, padding: 14, boxShadow: SH, marginBottom: 12 }}>
@@ -91,13 +89,12 @@ export default function QuickAddTask({ clients = [], members = [], onAdd, inputR
       {/* live-parsed, editable fields (correct anything the parser got wrong) */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
         <select
-          style={{ ...sel, flex: "none", minWidth: 150, ...(clientBad ? { borderColor: "#c0392b", background: "#fdecec" } : null) }}
+          style={{ ...sel, flex: "none", minWidth: 150 }}
           value={eff.client_id}
-          onChange={(e) => { setField("client_id", e.target.value); setShowClientErr(false); }}
-          aria-label="Client (required)"
-          aria-invalid={clientBad || undefined}
+          onChange={(e) => setField("client_id", e.target.value)}
+          aria-label="Client (optional)"
         >
-          <option value="">Client…</option>
+          <option value="">No client</option>
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <select style={{ ...sel, flex: "none", minWidth: 120 }} value={eff.type} onChange={(e) => setField("type", e.target.value)} aria-label="Task type">
