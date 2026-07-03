@@ -3,7 +3,7 @@ import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardLi
 import * as api from "../lib/api";
 import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, iconBtn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
-import { useRouter, clientIdFromPath, clientPath } from "../lib/router";
+import { useRouter, clientIdFromPath, clientPath, websiteFromPath, websitePath } from "../lib/router";
 import { useToast } from "../lib/toast";
 import { Center, Panel, Empty } from "./ui";
 import Overview from "./Overview";
@@ -18,7 +18,7 @@ import Revenue from "./Revenue";
 import Team from "./Team";
 import ClientForm from "./ClientForm";
 import ClientDetail from "./ClientDetail";
-import Websites from "./Websites";
+import Websites, { WebsiteDetail } from "./Websites";
 import CommandPalette from "./CommandPalette";
 import Settings from "./Settings";
 import { googleStatus } from "../lib/google";
@@ -56,14 +56,16 @@ export default function Dashboard({ session, onSignOut }) {
   // survives a refresh, instead of being a modal driven by local state.
   const { path, navigate } = useRouter();
   const detailId = clientIdFromPath(path);
+  const siteId = websiteFromPath(path); // /websites/:site — one page per imported website
 
   const isAdmin = session.role === "admin";
   const detailClient = detailId ? clients.find((c) => String(c.id) === String(detailId)) : null;
 
   const openClient = (c) => navigate(clientPath(c.id));
   const backToClients = () => { setTab("clients"); navigate("/"); };
+  const backToWebsites = () => { setTab("websites"); navigate("/"); };
   // Switch tabs, close the mobile drawer, and leave any open detail page.
-  const goTab = (k) => { setTab(k); setSidebarOpen(false); if (detailId) navigate("/"); };
+  const goTab = (k) => { setTab(k); setSidebarOpen(false); if (detailId || siteId) navigate("/"); };
 
   // A 401 means our stored session is no longer valid (e.g. the password was
   // rotated). Drop the stale session and bounce to the login screen instead of
@@ -303,7 +305,8 @@ export default function Dashboard({ session, onSignOut }) {
         </button>
         <nav className="nav" aria-label="Main navigation" style={{ display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
           {NAV.map((n) => {
-            const I = n.i, on = tab === n.k && !detailId;
+            // The Websites item stays highlighted while a per-site page is open.
+            const I = n.i, on = (tab === n.k && !detailId && !siteId) || (n.k === "websites" && Boolean(siteId));
             // Mouse clicks (e.detail > 0) drop focus so no ring can appear on
             // the last-clicked item later (browsers upgrade lingering focus to
             // :focus-visible on the next keystroke, e.g. ⌘K). Keyboard
@@ -335,7 +338,11 @@ export default function Dashboard({ session, onSignOut }) {
         </div>
 
         {errorBanner}
-        {detailId ? (
+        {siteId ? (
+          <div style={{ padding: 28 }}>
+            <WebsiteDetail site={siteId} onBack={backToWebsites} onRemoved={backToWebsites} />
+          </div>
+        ) : detailId ? (
           <div style={{ padding: 28 }}>
             {loading ? <Center>Loading client…</Center> :
               detailClient ? (
@@ -385,7 +392,7 @@ export default function Dashboard({ session, onSignOut }) {
                 tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onSave={saveDeliverable} onStatus={statusDeliverable} onDelete={delDeliverable} onGenerate={generateDeliverables} /> :
                 tab === "backlinks" ? <Backlinks clients={clients} backlinks={backlinks} onCreate={createBacklink} onUpdate={updateBacklink} onDelete={delBacklink} /> :
                 tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
-                tab === "websites" ? <Websites /> :
+                tab === "websites" ? <Websites onOpen={(site) => navigate(websitePath(site))} /> :
                 tab === "ai" ? <AiVisibility clients={clients} citations={aiCitations} onCreate={createAiCitation} onUpdate={updateAiCitation} onDelete={delAiCitation} /> :
                 tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
                 tab === "activity" ? <ActivityLog items={activity} clients={clients} /> :

@@ -715,7 +715,10 @@ export default async (req) => {
         if (!client.email) return json({ error: "Add a contact email to this client first." }, 400);
         const token = await getAccessToken(sql, auth.userId);
         const q = encodeURIComponent(`from:${client.email} OR to:${client.email}`);
-        const list = await gapi(token, `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=15&q=${q}`);
+        // 10, not more: each new message costs a fetch + an insert, and the
+        // whole invocation (schema + auth + list + loop) must stay well under
+        // Cloudflare's 50-subrequest budget even on a cold instance.
+        const list = await gapi(token, `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=10&q=${q}`);
         const msgs = list.messages || [];
         if (!msgs.length) return json({ ok: true, imported: 0 });
         // Skip messages already imported for this client (dedupe by Gmail id).

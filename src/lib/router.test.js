@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { clientIdFromPath, clientTabFromPath, clientPath, portalTokenFromPath, portalPath } from "./router.js";
+import { clientIdFromPath, clientTabFromPath, clientPath, portalTokenFromPath, portalPath, websiteFromPath, websitePath } from "./router.js";
+
+describe("websiteFromPath", () => {
+  it("round-trips Search Console site URLs (colons and slashes included)", () => {
+    expect(websiteFromPath(websitePath("sc-domain:example.com"))).toBe("sc-domain:example.com");
+    expect(websiteFromPath(websitePath("https://example.com/"))).toBe("https://example.com/");
+  });
+  it("returns null for other paths", () => {
+    expect(websiteFromPath("/websites")).toBe(null);
+    expect(websiteFromPath("/clients/abc")).toBe(null);
+    expect(websiteFromPath("/")).toBe(null);
+  });
+});
 
 describe("clientIdFromPath", () => {
   it("extracts the id from /clients/:id (with or without trailing slash)", () => {

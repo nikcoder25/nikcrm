@@ -42,6 +42,16 @@ export function clientTabFromPath(path) {
 export const clientPath = (id, tab) =>
   `/clients/${encodeURIComponent(id)}` + (tab && tab !== "overview" ? `/${encodeURIComponent(tab)}` : "");
 
+// /websites/:site -> the decoded site URL; any other path -> null. Site URLs
+// (sc-domain:example.com, https://example.com/) are URI-encoded into a single
+// path segment so each imported website gets its own linkable page.
+export function websiteFromPath(path) {
+  const m = /^\/websites\/([^/]+)\/?$/.exec(path || "");
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+export const websitePath = (site) => `/websites/${encodeURIComponent(site)}`;
+
 // /portal/:token -> ":token" (string); any other path -> null. The public
 // read-only client portal renders instead of the login/dashboard flow.
 export function portalTokenFromPath(path) {

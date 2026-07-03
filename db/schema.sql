@@ -356,6 +356,22 @@ create table if not exists gsc_cache (
   fetched_at timestamptz default now()
 );
 
+-- Schema version for data.js's runMigrations: existing databases apply only
+-- the deltas since their recorded version (single row, id=1).
+create table if not exists schema_meta (
+  id integer primary key,
+  version integer not null
+);
+
+-- Durable login/portal brute-force counters (v2). Per-instance memory is the
+-- first line; this row is the authority across Cloudflare's many short-lived
+-- Worker instances. Rows expire opportunistically after their window lapses.
+create table if not exists login_throttle (
+  ip text primary key,
+  fails integer default 0,
+  reset_at timestamptz default now()
+);
+
 -- ============================================================
 -- Indexes. Postgres does not auto-index FK columns; without these,
 -- per-client lookups and ON DELETE CASCADE degrade linearly with data size.

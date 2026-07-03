@@ -33,7 +33,9 @@ export const BACKLINK_STATES = [
   { key: "live", label: "Live" },
   { key: "lost", label: "Lost" },
 ];
-export const backlinkStatusLabel = (k) => (BACKLINK_STATES.find((s) => s.key === k) || BACKLINK_STATES[3]).label;
+// Unknown statuses show as themselves (or "Unknown"), never as a real state —
+// the old fallback displayed any unrecognized value as "Live".
+export const backlinkStatusLabel = (k) => BACKLINK_STATES.find((s) => s.key === k)?.label || (k ? String(k) : "Unknown");
 
 // AI answer engines tracked by the AI-visibility (AEO) module.
 export const AI_ENGINES = [

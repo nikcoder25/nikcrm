@@ -24,10 +24,45 @@ const json = (obj, status = 200) =>
 
 // Create the tables on first use so there is no manual SQL step. Cheap: the
 // CREATEs are guarded by IF NOT EXISTS and only run once per warm instance.
+//
+// EXISTING databases are versioned: bump SCHEMA_VERSION and add the delta to
+// runMigrations whenever DDL is added below. The old guard skipped everything
+// once `clients` existed, so later ALTERs silently never reached live
+// databases. Deltas stay small on purpose — a migration run must fit inside
+// Cloudflare's per-invocation subrequest budget alongside the actual request.
+const SCHEMA_VERSION = 2;
+
+async function runMigrations(sql, from) {
+  if (from < 2) {
+    // v2: durable login/portal brute-force throttle (see loginBlocked).
+    await sql`create table if not exists login_throttle (
+      ip text primary key,
+      fails integer default 0,
+      reset_at timestamptz default now()
+    )`;
+  }
+  await sql`insert into schema_meta (id, version) values (1, ${SCHEMA_VERSION})
+    on conflict (id) do update set version=${SCHEMA_VERSION}`;
+}
+
 let schemaReady = false;
 async function ensureSchema(sql) {
   if (schemaReady) return;
-  const _t = await sql`select to_regclass('public.clients') as n`; if (_t[0] && _t[0].n) { schemaReady = true; return; }
+  const t = await sql`select to_regclass('public.schema_meta') as meta, to_regclass('public.clients') as clients`;
+  if (t[0]?.meta) {
+    const v = await sql`select version from schema_meta where id=1`;
+    const from = Number(v[0]?.version) || 1;
+    if (from < SCHEMA_VERSION) await runMigrations(sql, from);
+    schemaReady = true;
+    return;
+  }
+  if (t[0]?.clients) {
+    // Database from before versioning existed: baseline v1, apply the deltas.
+    await sql`create table if not exists schema_meta (id integer primary key, version integer not null)`;
+    await runMigrations(sql, 1);
+    schemaReady = true;
+    return;
+  }
   await sql`create extension if not exists pgcrypto`;
   await sql`create table if not exists clients (
     id uuid primary key default gen_random_uuid(),
@@ -307,6 +342,10 @@ async function ensureSchema(sql) {
     sql`create index if not exists idx_activities_time on activities (happened_at)`,
     sql`create index if not exists idx_activities_gmail on activities (gmail_msg_id)`,
   ]);
+  // Fresh install: record the version and run the deltas too (they hold any
+  // tables that aren't part of the base DDL above, like login_throttle).
+  await sql`create table if not exists schema_meta (id integer primary key, version integer not null)`;
+  await runMigrations(sql, 1);
   schemaReady = true;
 }
 
@@ -517,14 +556,20 @@ function resolveRole(pw) {
   return null;                                  // wrong / missing password
 }
 
-// Brute-force throttle for login attempts. Per-instance memory is enough to
-// blunt password spraying without a datastore: after MAX_FAILS failures from
-// one IP inside the window, reject with 429 until the window resets.
+// Brute-force throttle for login/portal attempts: after MAX_FAILS failures
+// from one IP inside the window, reject with 429 until the window resets.
+// Two layers: per-instance memory (free, first line) AND the login_throttle
+// table. Memory alone was enough on Netlify's long-lived instances, but
+// Cloudflare Workers spin up many short-lived ones, so an attacker got a
+// fresh counter almost every time — the DB row is the durable authority.
+// Every DB helper fails open to the memory layer, so login never breaks on a
+// missing table or a DB hiccup.
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 const MAX_FAILS = 15;
 const loginFails = new Map(); // ip -> { count, resetAt }
 function clientIp(req) {
-  return req.headers.get("x-nf-client-connection-ip")
+  return req.headers.get("cf-connecting-ip")
+    || req.headers.get("x-nf-client-connection-ip")
     || (req.headers.get("x-forwarded-for") || "").split(",")[0].trim()
     || "unknown";
 }
@@ -541,6 +586,48 @@ function noteLoginFail(ip) {
     rec.count += 1;
   }
   if (loginFails.size > 5000) loginFails.clear(); // bound memory
+}
+
+// The table is ensured lazily by the throttle itself (once per instance), so
+// the shared-password login — which touches nothing else in the database —
+// stays protected without running the full schema setup.
+let throttleTableReady = false;
+async function ensureThrottleTable(sql) {
+  if (throttleTableReady) return;
+  await sql`create table if not exists login_throttle (
+    ip text primary key,
+    fails integer default 0,
+    reset_at timestamptz default now()
+  )`;
+  throttleTableReady = true;
+}
+
+// Durable check: blocked when the DB row is inside its window at the limit.
+async function loginBlockedDb(ip) {
+  if (!process.env.NETLIFY_DATABASE_URL) return false;
+  try {
+    const sql = db();
+    await ensureThrottleTable(sql);
+    const rows = await sql`select fails, reset_at from login_throttle where ip=${ip} limit 1`;
+    return rows.length > 0
+      && new Date(rows[0].reset_at).getTime() > Date.now()
+      && Number(rows[0].fails) >= MAX_FAILS;
+  } catch { return false; } // fail open — the memory layer still guards
+}
+
+// Durable count: start a fresh window when the old one lapsed, else increment.
+async function noteLoginFailDb(ip) {
+  if (!process.env.NETLIFY_DATABASE_URL) return;
+  try {
+    const sql = db();
+    await ensureThrottleTable(sql);
+    await sql`insert into login_throttle (ip, fails, reset_at) values (${ip}, 1, now() + interval '10 minutes')
+      on conflict (ip) do update set
+        fails = case when login_throttle.reset_at < now() then 1 else login_throttle.fails + 1 end,
+        reset_at = case when login_throttle.reset_at < now() then now() + interval '10 minutes' else login_throttle.reset_at end`;
+    // Opportunistic cleanup keeps the table tiny (failures are rare).
+    await sql`delete from login_throttle where reset_at < now() - interval '1 day'`;
+  } catch { /* memory layer already counted it */ }
 }
 
 const NOT_CONFIGURED = "Login isn't set up yet. Set APP_PASSWORD in Cloudflare.";
@@ -601,7 +688,7 @@ export default async (req) => {
       if (!process.env.NETLIFY_DATABASE_URL) {
         return json({ error: "Database not configured. Set NETLIFY_DATABASE_URL." }, 503);
       }
-      if (loginBlocked(ip)) return json({ error: "Too many attempts. Try again in a few minutes." }, 429);
+      if (loginBlocked(ip) || await loginBlockedDb(ip)) return json({ error: "Too many attempts. Try again in a few minutes." }, 429);
       try {
         const sql = db();
         await ensureSchema(sql);
@@ -620,6 +707,7 @@ export default async (req) => {
         }
         if (!ok) {
           noteLoginFail(ip);
+          await noteLoginFailDb(ip);
           return json({ error: "Wrong email or password." }, 401);
         }
         const role = rows[0].role === "admin" ? "admin" : "member";
@@ -634,10 +722,11 @@ export default async (req) => {
     // Shared team password — same checks as always, now also issuing a token
     // (sub "shared", the display name the person typed on the login screen).
     if (!authConfigured()) return json({ error: NOT_CONFIGURED }, 503);
-    if (loginBlocked(ip)) return json({ error: "Too many attempts. Try again in a few minutes." }, 429);
+    if (loginBlocked(ip) || await loginBlockedDb(ip)) return json({ error: "Too many attempts. Try again in a few minutes." }, 429);
     const role = resolveRole(payload.password || "");
     if (!role) {
       noteLoginFail(ip);
+      await noteLoginFailDb(ip);
       return json({ error: "Wrong password. Ask your team lead for it." }, 401);
     }
     const name = String(payload.name || "").trim().slice(0, 80) || "Team member";
@@ -656,7 +745,7 @@ export default async (req) => {
       return json({ error: "Database not configured. Set NETLIFY_DATABASE_URL." }, 503);
     }
     const ip = clientIp(req);
-    if (loginBlocked(ip)) return json({ error: "Too many attempts. Try again in a few minutes." }, 429);
+    if (loginBlocked(ip) || await loginBlockedDb(ip)) return json({ error: "Too many attempts. Try again in a few minutes." }, 429);
     try {
       const sql = db();
       await ensureSchema(sql);
@@ -666,6 +755,7 @@ export default async (req) => {
         : [];
       if (!found.length) {
         noteLoginFail(ip);
+        await noteLoginFailDb(ip);
         return json({ error: "Not found" }, 404);
       }
       const clientId = found[0].client_id;
@@ -739,7 +829,7 @@ export default async (req) => {
           "keywords", "keyword_history", "backlinks", "ai_citations",
           "ai_citation_history", "client_reports", "client_retainers",
           "team_members", "client_report_emails", "gsc_daily", "gsc_queries",
-          "activities", "activity",
+          "activities", "activity", "client_gsc_sites", "user_gsc_sites",
         ];
         const [users, ...rows] = await Promise.all([
           sql`select id, name, email, role, active, created_at from users`,
@@ -761,6 +851,10 @@ export default async (req) => {
           sql`select * from gsc_queries order by month`,
           sql`select * from activities order by created_at`,
           sql`select * from activity order by created_at`,
+          // Search Console mappings (no tokens — those stay excluded). The
+          // tables are owned by google.js and only exist once Google is used.
+          Promise.resolve(sql`select * from client_gsc_sites order by client_id`).catch(() => []),
+          Promise.resolve(sql`select * from user_gsc_sites order by user_id, site_url`).catch(() => []),
         ]);
         const tables = Object.fromEntries(names.map((n, i) => [n, rows[i]]));
         tables.users = users;
