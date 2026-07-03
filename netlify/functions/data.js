@@ -30,7 +30,7 @@ const json = (obj, status = 200) =>
 // once `clients` existed, so later ALTERs silently never reached live
 // databases. Deltas stay small on purpose — a migration run must fit inside
 // Cloudflare's per-invocation subrequest budget alongside the actual request.
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 async function runMigrations(sql, from) {
   if (from < 2) {
@@ -75,6 +75,13 @@ async function runMigrations(sql, from) {
     // v6: order acquisition source (Direct / Fiverr / Referral / Other), so
     // revenue-by-source in the Revenue analytics covers one-off orders too.
     await sql`alter table orders add column if not exists source text default 'Direct'`;
+  }
+  if (from < 7) {
+    // v7: per-client reference links (doc file / google sheet / Canva), shown as
+    // clickable icons on the Clients table. All optional http(s) URLs.
+    await sql`alter table clients add column if not exists doc_file text default ''`;
+    await sql`alter table clients add column if not exists google_sheet text default ''`;
+    await sql`alter table clients add column if not exists canva text default ''`;
   }
   await sql`insert into schema_meta (id, version) values (1, ${SCHEMA_VERSION})
     on conflict (id) do update set version=${SCHEMA_VERSION}`;
@@ -962,22 +969,29 @@ export default async (req) => {
         if (gscProperty === null) {
           return json({ error: 'Search Console property must start with "sc-domain:" or "http" (or be left blank).' }, 400);
         }
+        const docFile = safeHttpUrl(c.doc_file);
+        if (docFile === null) return json({ error: "Doc file link must be an http(s) URL (or blank)." }, 400);
+        const googleSheet = safeHttpUrl(c.google_sheet);
+        if (googleSheet === null) return json({ error: "Google sheet link must be an http(s) URL (or blank)." }, 400);
+        const canva = safeHttpUrl(c.canva);
+        if (canva === null) return json({ error: "Canva link must be an http(s) URL (or blank)." }, 400);
         if (c.id) {
           await sql`update clients set
             name=${c.name}, niche=${c.niche || ""}, status=${c.status || "active"},
             source=${c.source || "Direct"}, package=${c.package || "Standard"},
             fee=${Number(c.fee) || 0}, team_member=${c.team_member || ""},
             start_month=${c.start_month || ""}, renewal_month=${c.renewal_month || ""},
-            risk=${c.risk || "low"}, notes=${c.notes || ""}, gsc_property=${gscProperty}, email=${c.email || ""}
+            risk=${c.risk || "low"}, notes=${c.notes || ""}, gsc_property=${gscProperty}, email=${c.email || ""},
+            doc_file=${docFile}, google_sheet=${googleSheet}, canva=${canva}
             where id=${c.id}`;
           await logActivity(sql, { actor, verb: "updated client", entity: "client", entity_label: c.name, client_id: c.id });
         } else {
           const ins = await sql`insert into clients
-            (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes, gsc_property, email, created_by)
+            (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes, gsc_property, email, doc_file, google_sheet, canva, created_by)
             values (${c.name}, ${c.niche || ""}, ${c.status || "active"}, ${c.source || "Direct"},
                     ${c.package || "Standard"}, ${Number(c.fee) || 0}, ${c.team_member || ""},
                     ${c.start_month || ""}, ${c.renewal_month || ""}, ${c.risk || "low"},
-                    ${c.notes || ""}, ${gscProperty}, ${c.email || ""}, ${auth.name || c.created_by || ""}) returning id`;
+                    ${c.notes || ""}, ${gscProperty}, ${c.email || ""}, ${docFile}, ${googleSheet}, ${canva}, ${auth.name || c.created_by || ""}) returning id`;
           // A new client with a monthly fee gets a pending payment row for the
           // current month right away, so Revenue reflects money that's owed
           // without waiting for someone to open the Revenue tab.
