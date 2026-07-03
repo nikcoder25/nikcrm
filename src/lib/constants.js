@@ -55,6 +55,14 @@ export const ORDER_STATES = [
 ];
 export const orderStatusLabel = (k) => ORDER_STATES.find((s) => s.key === k)?.label || (k ? String(k) : "Unknown");
 
+// Blog production status per client (shown on the Clients table as a pill).
+export const BLOG_STATES = [
+  { key: "not_started", label: "Not started" },
+  { key: "in_progress", label: "In progress" },
+  { key: "done", label: "Done" },
+];
+export const blogStatusLabel = (k) => BLOG_STATES.find((s) => s.key === k)?.label || "Not started";
+
 // AI answer engines tracked by the AI-visibility (AEO) module.
 export const AI_ENGINES = [
   { key: "chatgpt", label: "ChatGPT" },

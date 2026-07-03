@@ -1,14 +1,47 @@
 import React, { useState, useMemo, useDeferredValue } from "react";
 import { Pencil, Trash2, Download, Search, Plus, FileText, Sheet, Palette } from "lucide-react";
 import { ink, accent, tint, btn, iconBtn, sel, input } from "../lib/theme";
-import { STATUSES, STATUS_LABEL } from "../lib/constants";
+import { STATUSES, STATUS_LABEL, BLOG_STATES, blogStatusLabel } from "../lib/constants";
 import { downloadCsv, clientsCsv } from "../lib/csv";
 import { computeHealth } from "../lib/health";
-import { money, ymLabel } from "../lib/format";
+import { money, dateLabel } from "../lib/format";
 import { Panel, Empty, HealthBadge } from "./ui";
 
 const GRAY = "#6b6580";
 const MUTED = "#a39db5";
+
+// Blog-status pill colours (not started / in progress / done).
+const BLOG_STYLE = {
+  not_started: { background: "#f0ece2", color: "#6b6580" },
+  in_progress: { background: "#d7f5df", color: "#1b7a3d" },
+  done: { background: "#dbe7fb", color: "#2358a8" },
+};
+
+// Whole days from today (local) until `end`: 0 = due today, negative = overdue.
+// Parsed by parts so the date never shifts across timezones.
+function daysLeft(end) {
+  if (!end) return null;
+  const [y, m, d] = String(end).slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return null;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((new Date(y, m - 1, d) - today) / 86400000);
+}
+
+// Countdown chip from a client's end date. "Done" once blog work is finished;
+// otherwise days-left, glowing orange within a day and red once overdue.
+function Countdown({ client, style }) {
+  if (client.blog_status === "done") return <span style={{ ...style, color: GRAY }}>Done</span>;
+  const d = daysLeft(client.end_date);
+  if (d == null) return <span style={{ ...style, color: MUTED }}>—</span>;
+  const label = d < 0 ? `${-d} day${d === -1 ? "" : "s"} overdue`
+    : d === 0 ? "Due today"
+    : `${d} day${d === 1 ? "" : "s"} left`;
+  const urgent = d < 0 ? { background: "#f7dede", color: "#c0392b" } : d <= 1 ? { background: "#fbbf4d" } : null;
+  return (
+    <span style={{ ...style, ...(urgent ? { ...urgent, borderRadius: 7, padding: "3px 8px", fontWeight: 800 } : null) }}>{label}</span>
+  );
+}
 
 // Bucket a list by client_id once, so per-row lookups are O(1).
 const groupBy = (rows) => {
@@ -49,7 +82,7 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
     if (statusFilter && c.status !== statusFilter) return false;
     if (healthFilter && (healthByClient.get(c.id)?.band || "") !== healthFilter) return false;
     if (!q) return true;
-    return [c.name, c.niche, c.team_member, c.source, c.package]
+    return [c.name, c.niche, c.team_member, c.source, c.package, c.order_details]
       .some((v) => (v || "").toLowerCase().includes(q));
   }), [clients, q, statusFilter, healthFilter, healthByClient]);
 
@@ -69,9 +102,10 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
   const th = { fontSize: 10.5, fontWeight: 800, color: GRAY, textTransform: "uppercase", letterSpacing: "0.04em", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" };
   const fileLink = { color: ink, display: "inline-flex" };
   // Columns stay fluid so the table always fits its container width — no
-  // horizontal scroll. Badge columns (Status/Health/Source/Risk) carry a small
-  // px floor so their pills never clip; text columns shrink to an ellipsis.
-  const GRID = "minmax(0,1.6fr) minmax(74px,0.9fr) minmax(120px,1.1fr) minmax(0,1fr) minmax(0,0.9fr) minmax(76px,0.8fr) minmax(0,0.7fr) minmax(0,1fr) minmax(0,0.85fr) minmax(0,0.9fr) minmax(66px,0.72fr) minmax(0,0.9fr) 76px 66px";
+  // horizontal scroll. Badge/countdown columns carry a small px floor so their
+  // pills never clip; text columns shrink to an ellipsis.
+  // Name Status Health Source Fee Risk Start End Countdown Order Blog Deliv Files Actions
+  const GRID = "minmax(0,1.45fr) minmax(74px,0.8fr) minmax(118px,1fr) minmax(74px,0.78fr) minmax(0,0.68fr) minmax(62px,0.68fr) minmax(0,0.92fr) minmax(0,0.92fr) minmax(100px,0.95fr) minmax(0,1.25fr) minmax(88px,0.9fr) minmax(0,0.82fr) 76px 66px";
 
   return (
     <div>
@@ -115,14 +149,14 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
             <span style={th}>Name</span>
             <span style={th}>Status</span>
             <span style={th}>Health</span>
-            <span style={th}>Niche</span>
-            <span style={th}>Package</span>
             <span style={th}>Source</span>
             <span style={th}>Fee</span>
-            <span style={th}>Team</span>
-            <span style={th}>Start</span>
-            <span style={th}>Renewal</span>
             <span style={th}>Risk</span>
+            <span style={th}>Start</span>
+            <span style={th}>End</span>
+            <span style={th}>Count Down</span>
+            <span style={th}>Order details</span>
+            <span style={th}>Blog</span>
             <span style={th}>Deliverables</span>
             <span style={th}>Files</span>
             <span />
@@ -144,18 +178,18 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
                   {STATUS_LABEL[c.status] || c.status}
                 </span>
                 <span style={{ minWidth: 0, display: "flex", alignItems: "center" }}><HealthBadge health={healthByClient.get(c.id)} size="sm" /></span>
-                <span style={{ ...cell, color: c.niche ? ink : MUTED }} title={c.niche}>{c.niche || "—"}</span>
-                <span style={{ ...cell, color: c.package ? GRAY : MUTED }} title={c.package}>{c.package || "—"}</span>
                 {c.source ? (
                   <span style={{ minWidth: 0, fontSize: 10.5, fontWeight: 800, background: tint, color: ink, padding: "3px 6px", borderRadius: 6, border: "2px solid " + ink, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={c.source}>{c.source}</span>
                 ) : <span style={{ ...cell, color: MUTED }}>—</span>}
                 <span style={{ ...cell, color: Number(c.fee) > 0 ? ink : MUTED }}>{Number(c.fee) > 0 ? money(c.fee) : "—"}</span>
-                <span style={{ ...cell, color: c.team_member ? ink : MUTED }} title={c.team_member}>{c.team_member || "—"}</span>
-                <span style={{ ...cell, color: c.start_month ? GRAY : MUTED }}>{c.start_month ? ymLabel(c.start_month) : "—"}</span>
-                <span style={{ ...cell, color: c.renewal_month ? GRAY : MUTED }}>{c.renewal_month ? ymLabel(c.renewal_month) : "—"}</span>
                 {risk ? (
                   <span style={{ ...risk, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "3px 6px", borderRadius: 6, fontSize: 11, fontWeight: 800, textAlign: "center", textTransform: "capitalize" }}>{c.risk}</span>
                 ) : <span style={{ ...cell, color: MUTED }}>—</span>}
+                <span style={{ ...cell, color: c.start_date ? GRAY : MUTED }}>{c.start_date ? dateLabel(c.start_date) : "—"}</span>
+                <span style={{ ...cell, color: c.end_date ? ink : MUTED }}>{c.end_date ? dateLabel(c.end_date) : "—"}</span>
+                <Countdown client={c} style={cell} />
+                <span style={{ ...cell, color: c.order_details ? GRAY : MUTED }} title={c.order_details}>{c.order_details || "—"}</span>
+                <span style={{ ...BLOG_STYLE[c.blog_status] || BLOG_STYLE.not_started, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "3px 6px", borderRadius: 6, fontSize: 11, fontWeight: 800, textAlign: "center" }} title={blogStatusLabel(c.blog_status)}>{blogStatusLabel(c.blog_status)}</span>
                 {dels && dels.total > 0 ? (
                   <span title="Deliverables delivered / total" style={{ minWidth: 0, overflow: "hidden", fontSize: 11, fontWeight: 800, background: "#fff", color: ink, padding: "4px 6px", borderRadius: 7, border: "2px solid " + ink, textAlign: "center", whiteSpace: "nowrap" }}>
                     {dels.delivered}/{dels.total}
