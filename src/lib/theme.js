@@ -39,6 +39,8 @@ export const globalCss = `
   button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 3px solid ${accent}; outline-offset: 2px; }
   .spin { animation: rot .8s linear infinite; }
   @keyframes rot { to { transform: rotate(360deg); } }
+  /* Mic button while dictating: a soft red ring pulse. */
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(192,57,43,.5); } 50% { box-shadow: 0 0 0 6px rgba(192,57,43,0); } }
   /* Horizontal scroll container for wide tables/grids: phones swipe sideways
      instead of breaking the layout; a no-op when the content already fits. */
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
