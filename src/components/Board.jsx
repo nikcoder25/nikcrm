@@ -1,49 +1,22 @@
 import React, { useMemo, useRef, useState } from "react";
-import { Plus, X, Filter, Search, Loader } from "lucide-react";
-import { ink, accent, tint, disp, BD, BDt, SH, SHs, sel, btn, moveBtn } from "../lib/theme";
-import { TASK_TYPES, TASK_STATES, typeLabel } from "../lib/constants";
+import { X, Filter, Search } from "lucide-react";
+import { ink, accent, tint, disp, BD, BDt, SH, SHs, sel, moveBtn } from "../lib/theme";
+import { TASK_STATES, typeLabel } from "../lib/constants";
 import { isPastDue } from "../lib/format";
-import { useToast } from "../lib/toast";
 import { assigneeOptions } from "./ui";
+import QuickAddTask from "./QuickAddTask";
 
 /* ---------------- Task Board ---------------- */
 export default function Board({ clients, tasks, members = [], onAdd, onMove, onAssign, onDelete }) {
   const wp = clients.filter((c) => c.status !== "ended" && c.status !== "loss");
-  const [f, setF] = useState({ client_id: "", title: "", type: "guest", assignee: "", due: "" });
-  const [errors, setErrors] = useState({});
-  const [busy, setBusy] = useState(false);
   const [filterClient, setFilterClient] = useState("");
   const [filterAssignee, setFilterAssignee] = useState("");
   const [query, setQuery] = useState("");
   const [dragId, setDragId] = useState(null);
   const [overCol, setOverCol] = useState(null);
   const titleRef = useRef(null);
-  const toast = useToast();
 
   const nameOf = (id) => (clients.find((c) => c.id === id)?.name) || "";
-
-  const add = async () => {
-    if (busy) return;
-    const errs = {};
-    if (!f.client_id) errs.client_id = true;
-    if (!f.title.trim()) errs.title = true;
-    setErrors(errs);
-    if (Object.keys(errs).length) {
-      toast("Pick a client and enter a task title.", "error");
-      return;
-    }
-    setBusy(true);
-    try {
-      await onAdd({ client_id: f.client_id, title: f.title.trim(), type: f.type, assignee: f.assignee, status: "todo", due: f.due || null });
-      toast("Task added");
-      setF({ ...f, title: "", assignee: "", due: "" });
-      setErrors({});
-    } catch (e) {
-      toast(e?.message || "Could not add task.", "error");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   // Filter options: roster names, plus any legacy assignees still on tasks.
   const assigneeNames = useMemo(() => {
@@ -69,27 +42,10 @@ export default function Board({ clients, tasks, members = [], onAdd, onMove, onA
     }
   };
 
-  const errInput = (bad) => ({ ...sel, ...(bad ? { borderColor: "#c0392b", background: "#fdecec" } : null) });
-
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", background: "#fff", border: BD, borderRadius: 14, padding: 14, boxShadow: SH, marginBottom: 12 }}>
-        <select style={errInput(errors.client_id)} value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })} aria-label="Client (required)" aria-invalid={errors.client_id || undefined}>
-          <option value="">Client…</option>
-          {wp.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        <select style={sel} value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })} aria-label="Task type">
-          {TASK_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-        </select>
-        <input ref={titleRef} style={{ ...errInput(errors.title), flex: 2, minWidth: 150 }} placeholder="Task title (e.g. Guest post on hvacblog.com)" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} aria-label="Task title (required)" aria-invalid={errors.title || undefined} onKeyDown={(e) => e.key === "Enter" && add()} />
-        <select style={sel} value={f.assignee} onChange={(e) => setF({ ...f, assignee: e.target.value })} aria-label="Assignee">
-          {assigneeOptions(members, f.assignee).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-        <input type="date" style={sel} value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} aria-label="Due date" />
-        <button style={{ ...btn(accent, "#fff"), opacity: busy ? 0.7 : 1 }} onClick={add} disabled={busy}>
-          {busy ? <Loader size={16} className="spin" /> : <Plus size={16} />} Add
-        </button>
-      </div>
+      {/* Natural-language quick add (type or dictate a whole task in one line) */}
+      <QuickAddTask clients={wp} members={members} onAdd={onAdd} inputRef={titleRef} />
 
       {/* Board filters — essential once you're juggling dozens of clients */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 18 }}>
