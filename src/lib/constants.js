@@ -13,7 +13,16 @@ export const TASK_TYPES = [
 ];
 export const typeLabel = (k) => (TASK_TYPES.find((t) => t.key === k) || TASK_TYPES[7]).label;
 
-export const TASK_STATES = [{ key: "todo", label: "To Do" }, { key: "doing", label: "In Progress" }, { key: "done", label: "Done" }];
+// Task board columns. Existing rows use todo/doing/done; review + blocked were
+// added later, so the API's enum check derives from this list automatically.
+export const TASK_STATES = [
+  { key: "todo", label: "To Do" },
+  { key: "doing", label: "In Progress" },
+  { key: "review", label: "In Review" },
+  { key: "blocked", label: "Blocked" },
+  { key: "done", label: "Done" },
+];
+export const taskStatusLabel = (k) => TASK_STATES.find((s) => s.key === k)?.label || (k ? String(k) : "To Do");
 export const PAY_STATES = [{ key: "pending", label: "Pending" }, { key: "paid", label: "Paid" }, { key: "overdue", label: "Overdue" }];
 
 // Deliverables reuse TASK_TYPES for their "type"; these are their workflow states.

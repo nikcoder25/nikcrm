@@ -44,8 +44,9 @@ create table if not exists tasks (
   title text not null,
   type text default 'other',              -- guest / onpage / backlink / anchor / blog / audit / schema / other
   assignee text default '',
-  status text default 'todo',             -- todo / doing / done
+  status text default 'todo',             -- todo / doing / review / blocked / done
   due date,
+  description text default '',            -- free-text brief for whoever picks it up
   created_at timestamptz default now()
 );
 

@@ -210,6 +210,9 @@ export default function Dashboard({ session, onSignOut }) {
   };
 
   const saveTask = (t) => save(() => api.addTask(t), ["tasks"]);
+  // Full edit from the task detail card — throws so the modal can keep itself
+  // open on failure (mirrors saveTask).
+  const editTask = (t) => save(() => api.updateTask(t), ["tasks"]);
   const delTask = (id) => { if (window.confirm("Delete this task?")) run(() => api.deleteTask(id), ["tasks"], "Task deleted"); };
   // High-frequency status changes are applied to local state IMMEDIATELY
   // (optimistic), then synced to the server; on failure `run` resyncs.
@@ -417,7 +420,7 @@ export default function Dashboard({ session, onSignOut }) {
               {loading ? <Center>Loading your board...</Center> :
                 tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} activities={activities} activity={activity} onNavigate={goTab} onOpenClient={openClient} /> :
                 tab === "clients" ? <Clients clients={clients} deliverables={deliverables} payments={payments} tasks={tasks} keywords={keywords} activities={activities} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} onAdd={openAddClient} /> :
-                tab === "tasks" ? <Board clients={clients} tasks={tasks} members={members} onAdd={saveTask} onMove={moveTask} onAssign={assignTask} onDelete={delTask} /> :
+                tab === "tasks" ? <Board clients={clients} tasks={tasks} members={members} onAdd={saveTask} onUpdate={editTask} onMove={moveTask} onAssign={assignTask} onDelete={delTask} /> :
                 tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onSave={saveDeliverable} onStatus={statusDeliverable} onDelete={delDeliverable} onGenerate={generateDeliverables} /> :
                 tab === "orders" ? <Orders orders={orders} onCreate={createOrder} onImport={importOrders} onUpdate={updateOrder} onStatus={statusOrder} onDelete={delOrder} isAdmin={isAdmin} /> :
                 tab === "backlinks" ? <Backlinks clients={clients} backlinks={backlinks} onCreate={createBacklink} onUpdate={updateBacklink} onDelete={delBacklink} /> :
