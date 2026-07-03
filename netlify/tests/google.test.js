@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { allowedAppOrigins, resolveAppOrigin } from "./google.js";
+import { allowedAppOrigins, resolveAppOrigin } from "../functions/google.js";
 
 // The OAuth callback redirects the browser to the "app origin" recorded when
 // the flow started — for SSO that redirect carries a session token, so ONLY
