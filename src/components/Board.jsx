@@ -1,10 +1,11 @@
 import React, { useMemo, useRef, useState } from "react";
-import { Plus, X, Filter, Search, Loader } from "lucide-react";
+import { Plus, X, Filter, Search, Loader, Sparkles } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, SH, SHs, sel, btn, moveBtn } from "../lib/theme";
 import { TASK_TYPES, TASK_STATES, typeLabel } from "../lib/constants";
 import { isPastDue } from "../lib/format";
 import { useToast } from "../lib/toast";
 import { assigneeOptions } from "./ui";
+import PromptTask from "./PromptTask";
 
 /* ---------------- Task Board ---------------- */
 export default function Board({ clients, tasks, members = [], onAdd, onMove, onAssign, onDelete }) {
@@ -17,6 +18,8 @@ export default function Board({ clients, tasks, members = [], onAdd, onMove, onA
   const [query, setQuery] = useState("");
   const [dragId, setDragId] = useState(null);
   const [overCol, setOverCol] = useState(null);
+  const [showPrompt, setShowPrompt] = useState(false); // prompt/voice composer
+
   const titleRef = useRef(null);
   const toast = useToast();
 
@@ -88,6 +91,9 @@ export default function Board({ clients, tasks, members = [], onAdd, onMove, onA
         <input type="date" style={sel} value={f.due} onChange={(e) => setF({ ...f, due: e.target.value })} aria-label="Due date" />
         <button style={{ ...btn(accent, "#fff"), opacity: busy ? 0.7 : 1 }} onClick={add} disabled={busy}>
           {busy ? <Loader size={16} className="spin" /> : <Plus size={16} />} Add
+        </button>
+        <button style={btn("#fff", ink)} onClick={() => setShowPrompt(true)} title="Describe the task in plain words or dictate it with your voice">
+          <Sparkles size={16} /> Prompt
         </button>
       </div>
 
@@ -167,6 +173,8 @@ export default function Board({ clients, tasks, members = [], onAdd, onMove, onA
           );
         })}
       </div>
+
+      {showPrompt && <PromptTask clients={wp} members={members} onAdd={onAdd} onClose={() => setShowPrompt(false)} />}
     </div>
   );
 }

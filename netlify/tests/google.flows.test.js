@@ -103,7 +103,7 @@ function sqlMock(strings, ...values) {
 }
 
 vi.mock("@netlify/neon", () => ({ neon: () => sqlMock }));
-const handler = (await import("./google.js")).default;
+const handler = (await import("../functions/google.js")).default;
 
 // ---- Google endpoints mock ----
 const googleAccount = { id: "sub-123", email: "nik@agency.com" };
