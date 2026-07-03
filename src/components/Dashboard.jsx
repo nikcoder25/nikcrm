@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles, Menu, X, Settings as SettingsIcon, TrendingUp, Globe } from "lucide-react";
 import * as api from "../lib/api";
-import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, iconBtn, globalCss } from "../lib/theme";
+import { ink, accent, cream, sideBg, sideText, disp, BD, BDt, SHs, tint, btn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
 import { useRouter, clientIdFromPath, clientPath, websiteFromPath, websitePath } from "../lib/router";
 import { useToast } from "../lib/toast";
@@ -287,16 +287,18 @@ export default function Dashboard({ session, onSignOut }) {
   const openAddClient = () => { setEditing(null); setShowForm(true); };
 
   return (
-    <div className="shell" style={{ display: "flex", minHeight: "100vh", background: cream, color: ink, fontFamily: "'Inter',sans-serif" }}>
+    // Layout (heights, scrolling, drawer behavior) lives in globalCss under
+    // .shell / .side / .main — only visual styling is inline here.
+    <div className="shell" style={{ background: cream, color: ink, fontFamily: "'Inter',sans-serif" }}>
       <style>{globalCss}</style>
 
       <div className={"side-backdrop" + (sidebarOpen ? " show" : "")} onClick={() => setSidebarOpen(false)} aria-hidden="true" />
 
-      <aside className={"side" + (sidebarOpen ? " open" : "")} style={{ width: 244, flexShrink: 0, background: "#241146", color: "#f4eeff", padding: "22px 16px", display: "flex", flexDirection: "column", borderRight: BD, position: "sticky", top: 0, height: "100vh" }}>
+      <aside className={"side" + (sidebarOpen ? " open" : "")} style={{ background: sideBg, color: "#f4eeff", padding: "22px 16px", borderRight: BD }}>
         <div style={{ display: "flex", alignItems: "center", gap: 11, paddingBottom: 18, borderBottom: "3px dashed rgba(255,255,255,.25)", marginBottom: 14 }}>
           <div style={{ width: 42, height: 42, borderRadius: 11, background: "#fff", color: ink, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: disp, fontSize: 16, border: BD, boxShadow: SHs }}>GA</div>
-          <div style={{ flex: 1 }}><div style={{ fontFamily: disp, fontSize: 17, color: "#fff" }}>Growth Atlas</div><div style={{ fontSize: 10.5, color: "#c9bdf0", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>SEO Ops</div></div>
-          <button className="mobbar" onClick={() => setSidebarOpen(false)} aria-label="Close menu" style={{ background: "rgba(255,255,255,.12)", border: "none", borderRadius: 8, padding: 6, color: "#fff", cursor: "pointer" }}><X size={18} /></button>
+          <div style={{ flex: 1 }}><div style={{ fontFamily: disp, fontSize: 17, color: "#fff" }}>Growth Atlas</div><div style={{ fontSize: 10.5, color: sideText, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>SEO Ops</div></div>
+          <button className="mobbar" onClick={() => setSidebarOpen(false)} aria-label="Close menu" style={{ background: "rgba(255,255,255,.12)", border: "none", borderRadius: 8, padding: 10, color: "#fff", cursor: "pointer" }}><X size={20} /></button>
         </div>
         <button onClick={() => { setPaletteOpen(true); setSidebarOpen(false); }} aria-label="Search (Command or Control K)"
           style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "10px 12px", marginBottom: 12, borderRadius: 10, border: BDt, background: "rgba(255,255,255,.1)", color: "#e9deff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
@@ -312,7 +314,7 @@ export default function Dashboard({ session, onSignOut }) {
             // :focus-visible on the next keystroke, e.g. ⌘K). Keyboard
             // activation (e.detail === 0) keeps focus and its visible ring.
             return <button key={n.k} className="ni" onClick={(e) => { if (e.detail) e.currentTarget.blur(); goTab(n.k); }} aria-current={on ? "page" : undefined}
-              style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", borderRadius: 11, border: on ? BD : "3px solid transparent", background: on ? "#fff" : "transparent", color: on ? ink : "#c9bdf0", fontWeight: on ? 800 : 700, fontSize: 14.5, cursor: "pointer", textAlign: "left", boxShadow: on ? "4px 4px 0 rgba(0,0,0,.4)" : "none" }}>
+              style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 13px", borderRadius: 11, border: on ? BD : "3px solid transparent", background: on ? "#fff" : "transparent", color: on ? ink : sideText, fontWeight: on ? 800 : 700, fontSize: 14.5, cursor: "pointer", textAlign: "left", boxShadow: on ? "4px 4px 0 rgba(0,0,0,.4)" : "none" }}>
               <I size={17} /> <span>{n.l}</span>
             </button>;
           })}
@@ -329,21 +331,30 @@ export default function Dashboard({ session, onSignOut }) {
         </div>
       </aside>
 
-      <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        {/* Mobile top bar (hidden on desktop via .mobbar) */}
-        <div className="mobbar" style={{ alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: BD, background: "#fff", position: "sticky", top: 0, zIndex: 100 }}>
-          <button onClick={() => setSidebarOpen(true)} aria-label="Open menu" style={{ ...iconBtn }}><Menu size={20} /></button>
-          <span style={{ fontFamily: disp, fontSize: 18, flex: 1 }}>Growth Atlas</span>
-          <button onClick={() => setPaletteOpen(true)} aria-label="Search" style={{ ...iconBtn }}><Search size={20} /></button>
+      <main className="main">
+        {/* Mobile top app bar (hidden on desktop via .mobbar): same dark rail
+            as the sidebar so the shell reads as one piece, with the logo and
+            a >=40px hamburger + search. Sticky inside the scrolling main. */}
+        <div className="mobbar" style={{ alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: BD, background: sideBg, color: "#fff", position: "sticky", top: 0, zIndex: 100 }}>
+          <button onClick={() => setSidebarOpen(true)} aria-label="Open menu"
+            style={{ background: "rgba(255,255,255,.12)", border: "none", borderRadius: 9, padding: 10, color: "#fff", cursor: "pointer", display: "flex" }}>
+            <Menu size={20} />
+          </button>
+          <div style={{ width: 34, height: 34, borderRadius: 9, background: "#fff", color: ink, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: disp, fontSize: 13, border: BDt }}>GA</div>
+          <span style={{ fontFamily: disp, fontSize: 17, flex: 1, minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>Growth Atlas</span>
+          <button onClick={() => setPaletteOpen(true)} aria-label="Search"
+            style={{ background: "rgba(255,255,255,.12)", border: "none", borderRadius: 9, padding: 10, color: "#fff", cursor: "pointer", display: "flex" }}>
+            <Search size={20} />
+          </button>
         </div>
 
         {errorBanner}
         {siteId ? (
-          <div style={{ padding: 28 }}>
+          <div className="page-pad">
             <WebsiteDetail site={siteId} onBack={backToWebsites} onRemoved={backToWebsites} />
           </div>
         ) : detailId ? (
-          <div style={{ padding: 28 }}>
+          <div className="page-pad">
             {loading ? <Center>Loading client…</Center> :
               detailClient ? (
                 <ClientDetail
@@ -379,12 +390,12 @@ export default function Dashboard({ session, onSignOut }) {
           </div>
         ) : (
           <>
-            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 28px", borderBottom: BD, flexWrap: "wrap", gap: 12 }}>
-              <h1 style={{ fontFamily: disp, fontSize: 26, textTransform: "uppercase", letterSpacing: "-0.02em" }}>{NAV.find((n) => n.k === tab)?.l}</h1>
+            <header className="page-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: BD, flexWrap: "wrap", gap: 12 }}>
+              <h1 style={{ fontFamily: disp, fontSize: "clamp(19px, 4vw, 26px)", textTransform: "uppercase", letterSpacing: "-0.02em" }}>{NAV.find((n) => n.k === tab)?.l}</h1>
               {tab === "clients" && <button style={btn(accent, "#fff")} onClick={openAddClient}><Plus size={16} /> Add client</button>}
             </header>
 
-            <div style={{ padding: 28 }}>
+            <div className="page-pad">
               {loading ? <Center>Loading your board...</Center> :
                 tab === "overview" ? <Overview clients={clients} tasks={tasks} deliverables={deliverables} payments={payments} keywords={keywords} retainers={retainers} activities={activities} activity={activity} onNavigate={goTab} onOpenClient={openClient} /> :
                 tab === "clients" ? <Clients clients={clients} deliverables={deliverables} payments={payments} tasks={tasks} keywords={keywords} activities={activities} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} onAdd={openAddClient} /> :

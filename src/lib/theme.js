@@ -3,6 +3,10 @@ export const ink = "#17161c";
 export const accent = "#6d28d9";
 export const cream = "#f6efe0";
 export const tint = "#ece7fb";
+// The dark rail: sidebar + mobile top bar share these so there are no
+// mismatched dark-vs-cream seams anywhere in the shell.
+export const sideBg = "#241146";
+export const sideText = "#c9bdf0";
 export const disp = "'Archivo Black','Space Grotesk',sans-serif";
 
 export const BD = `3px solid ${ink}`;
@@ -26,6 +30,10 @@ export const globalCss = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&family=Archivo+Black&display=swap');
   * { margin: 0; box-sizing: border-box; }
   h1, h2, h3, h4 { margin: 0; font-weight: inherit; }
+  /* A select's intrinsic width is its longest <option> (e.g. a long client
+     name), which punches through flex rows on phones — cap every form control
+     at its container so toolbars can never cause horizontal overflow. */
+  select, input, textarea { max-width: 100%; }
   ::placeholder { color: #a39db5; }
   input:focus, select:focus, textarea:focus { outline: none; border-color: ${accent}; }
   button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 3px solid ${accent}; outline-offset: 2px; }
@@ -44,20 +52,53 @@ export const globalCss = `
   .ni:focus { outline: none; }
   .ni:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 
-  /* Mobile top bar + slide-in sidebar drawer. Hidden on desktop. */
+  /* ---------------- app shell ----------------
+     The shell is exactly one viewport tall and never scrolls itself; the MAIN
+     column is the only vertical scroller. The sidebar is its own full-height
+     column that scrolls internally when its items overflow — page scrolling
+     can never move it or reveal the cream background beneath it. (dvh with a
+     vh fallback so mobile browser chrome doesn't leave a dead strip.) */
+  .shell { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
+  .side {
+    width: 244px; flex-shrink: 0; height: 100%;
+    display: flex; flex-direction: column;
+    overflow-y: auto; overscroll-behavior: contain;
+  }
+  .main {
+    flex: 1; min-width: 0; height: 100%;
+    display: flex; flex-direction: column;
+    overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
+  }
+
+  /* Page padding shared by every screen; tightens on small viewports. */
+  .page-pad { padding: 28px; }
+  .page-head { padding: 20px 28px; }
+
+  /* Two-column form rows stack on narrow phones. */
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* Mobile top app bar (hidden on desktop). */
   .mobbar { display: none; }
   .side-backdrop { display: none; }
-  @media (max-width: 900px) {
+
+  /* Tablet & phone: the sidebar becomes an off-canvas drawer over a dimmed
+     backdrop, opened from the hamburger in the top app bar. */
+  @media (max-width: 1024px) {
     .mobbar { display: flex !important; }
     .side {
-      position: fixed !important; left: 0; top: 0; height: 100vh !important; width: 260px !important;
+      position: fixed; left: 0; top: 0; height: 100vh; height: 100dvh; width: 280px;
       z-index: 130; transform: translateX(-100%); transition: transform .2s ease;
     }
     .side.open { transform: translateX(0); box-shadow: 8px 0 0 rgba(0,0,0,.35); }
     .side-backdrop.show { display: block; position: fixed; inset: 0; background: rgba(23,22,28,.5); z-index: 120; }
   }
-  @media (max-width: 760px) {
+  @media (max-width: 768px) {
+    .page-pad { padding: 14px 12px 32px; }
+    .page-head { padding: 14px 16px; }
     .board { grid-template-columns: 1fr !important; }
+    .form-row { grid-template-columns: 1fr; }
+    /* 16px inputs stop iOS Safari from zooming the page on focus. */
+    input, select, textarea { font-size: 16px !important; }
   }
   .print-only { display: none; }
   @media print {

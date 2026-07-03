@@ -36,7 +36,9 @@ export function Pick({ label, value, set, opts, required, error }) {
   );
 }
 
-export const Row = ({ children }) => <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>{children}</div>;
+// Two side-by-side fields on desktop; stacks to one column on narrow phones
+// (.form-row in theme.js).
+export const Row = ({ children }) => <div className="form-row">{children}</div>;
 export const Panel = ({ children }) => <div style={{ background: "#fff", border: BD, borderRadius: 16, boxShadow: SH, overflow: "hidden" }}>{children}</div>;
 
 // Empty state with an optional call-to-action button, so a blank section can
