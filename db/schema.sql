@@ -38,6 +38,15 @@ alter table clients add column if not exists doc_file text default '';
 alter table clients add column if not exists google_sheet text default '';
 alter table clients add column if not exists canva text default '';
 
+-- Per-client project tracking shown on the Clients table: start/end dates
+-- (end_date drives the countdown), free-text order details, and blog status
+-- (not_started / in_progress / done). Kept as ALTERs so existing databases
+-- upgrade in place.
+alter table clients add column if not exists start_date date;
+alter table clients add column if not exists end_date date;
+alter table clients add column if not exists order_details text default '';
+alter table clients add column if not exists blog_status text default 'not_started';
+
 create table if not exists tasks (
   id uuid primary key default gen_random_uuid(),
   client_id uuid references clients(id) on delete cascade,

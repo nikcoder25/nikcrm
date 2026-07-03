@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Loader } from "lucide-react";
 import { accent, btn, lbl, input } from "../lib/theme";
-import { STATUSES, STATUS_LABEL, SOURCES, PACKAGES } from "../lib/constants";
+import { STATUSES, STATUS_LABEL, SOURCES, PACKAGES, BLOG_STATES } from "../lib/constants";
 import { useToast } from "../lib/toast";
 import { Field, Pick, Row, Modal, assigneeOptions } from "./ui";
 
@@ -11,6 +11,7 @@ export default function ClientForm({ initial, members = [], onClose, onSave }) {
     name: "", niche: "", status: "active", source: "Direct", package: "Standard",
     fee: "", team_member: "", start_month: "", renewal_month: "", risk: "low", notes: "", gsc_property: "", email: "",
     doc_file: "", google_sheet: "", canva: "",
+    start_date: "", end_date: "", order_details: "", blog_status: "not_started",
   });
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
@@ -29,7 +30,12 @@ export default function ClientForm({ initial, members = [], onClose, onSave }) {
     if (Object.keys(errs).length) return;
     setBusy(true);
     try {
-      await onSave({ ...f, fee: Number(f.fee) || 0 });
+      await onSave({
+        ...f,
+        fee: Number(f.fee) || 0,
+        start_date: f.start_date ? String(f.start_date).slice(0, 10) : null,
+        end_date: f.end_date ? String(f.end_date).slice(0, 10) : null,
+      });
       toast(initial ? "Client updated" : "Client added");
       onClose();
     } catch (e) {
@@ -70,6 +76,14 @@ export default function ClientForm({ initial, members = [], onClose, onSave }) {
         <Field label="Google sheet link" value={f.google_sheet || ""} onChange={(v) => set("google_sheet", v)} placeholder="https://docs.google.com/… (optional)" />
       </Row>
       <Field label="Canva link" value={f.canva || ""} onChange={(v) => set("canva", v)} placeholder="https://canva.com/… (optional)" />
+      <Row>
+        <Field label="Project start date" value={f.start_date ? String(f.start_date).slice(0, 10) : ""} onChange={(v) => set("start_date", v)} type="date" />
+        <Field label="Project end date" value={f.end_date ? String(f.end_date).slice(0, 10) : ""} onChange={(v) => set("end_date", v)} type="date" />
+      </Row>
+      <Row>
+        <Field label="Order details" value={f.order_details || ""} onChange={(v) => set("order_details", v)} placeholder="e.g. monthly seo (5 blogs)" />
+        <Pick label="Blog status" value={f.blog_status || "not_started"} set={(v) => set("blog_status", v)} opts={BLOG_STATES.map((s) => [s.key, s.label])} />
+      </Row>
       <label style={lbl} htmlFor="client-notes">Notes</label>
       <textarea id="client-notes" style={{ ...input, minHeight: 60, resize: "vertical" }} value={f.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Notes, special requests..." />
       <button style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 20, justifyContent: "center", opacity: busy ? 0.7 : 1 }} onClick={submit} disabled={busy}>

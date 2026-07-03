@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { neon } from "@netlify/neon";
 import { newPasswordRecord, verifyPassword, signToken, verifyToken } from "../lib/auth.js";
 import { fileStore } from "../lib/files.js";
-import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, BACKLINK_STATES, ORDER_STATES, AI_ENGINES, ACTIVITY_TYPES, typeLabel, activityLabel } from "../../src/lib/constants.js";
+import { STATUSES, SOURCES, PACKAGES, RISKS, TASK_TYPES, TASK_STATES, PAY_STATES, DELIVERABLE_STATES, BACKLINK_STATES, ORDER_STATES, BLOG_STATES, AI_ENGINES, ACTIVITY_TYPES, typeLabel, activityLabel } from "../../src/lib/constants.js";
 import { lastDayOfMonth } from "../../src/lib/format.js";
 
 // Uploaded client files live in the file_blobs table (see lib/files.js) so the
@@ -30,7 +30,7 @@ const json = (obj, status = 200) =>
 // once `clients` existed, so later ALTERs silently never reached live
 // databases. Deltas stay small on purpose — a migration run must fit inside
 // Cloudflare's per-invocation subrequest budget alongside the actual request.
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 async function runMigrations(sql, from) {
   if (from < 2) {
@@ -87,6 +87,14 @@ async function runMigrations(sql, from) {
     // v8: free-text task description so a card carries the full brief a
     // teammate needs to pick it up and start.
     await sql`alter table tasks add column if not exists description text default ''`;
+  }
+  if (from < 9) {
+    // v9: per-client project tracking on the Clients table — start/end dates
+    // (end drives the countdown), free-text order details, and blog status.
+    await sql`alter table clients add column if not exists start_date date`;
+    await sql`alter table clients add column if not exists end_date date`;
+    await sql`alter table clients add column if not exists order_details text default ''`;
+    await sql`alter table clients add column if not exists blog_status text default 'not_started'`;
   }
   await sql`insert into schema_meta (id, version) values (1, ${SCHEMA_VERSION})
     on conflict (id) do update set version=${SCHEMA_VERSION}`;
@@ -484,6 +492,7 @@ const PAY_STATE_KEYS = PAY_STATES.map((s) => s.key);
 const DELIVERABLE_STATE_KEYS = DELIVERABLE_STATES.map((s) => s.key);
 const BACKLINK_STATE_KEYS = BACKLINK_STATES.map((s) => s.key);
 const ORDER_STATE_KEYS = ORDER_STATES.map((s) => s.key);
+const BLOG_STATE_KEYS = BLOG_STATES.map((s) => s.key);
 const AI_ENGINE_KEYS = AI_ENGINES.map((e) => e.key);
 const ACTIVITY_TYPE_KEYS = ACTIVITY_TYPES.map((t) => t.key);
 const KEYWORD_PLATFORMS = ["desktop", "mobile"];
@@ -969,7 +978,8 @@ export default async (req) => {
         const bad = badEnum("status", c.status, STATUSES)
           || badEnum("source", c.source, SOURCES)
           || badEnum("package", c.package, PACKAGES)
-          || badEnum("risk", c.risk, RISKS);
+          || badEnum("risk", c.risk, RISKS)
+          || (c.blog_status ? badEnum("blog_status", c.blog_status, BLOG_STATE_KEYS) : null);
         if (bad) return bad;
         const gscProperty = safeGscProperty(c.gsc_property);
         if (gscProperty === null) {
@@ -988,16 +998,19 @@ export default async (req) => {
             fee=${Number(c.fee) || 0}, team_member=${c.team_member || ""},
             start_month=${c.start_month || ""}, renewal_month=${c.renewal_month || ""},
             risk=${c.risk || "low"}, notes=${c.notes || ""}, gsc_property=${gscProperty}, email=${c.email || ""},
-            doc_file=${docFile}, google_sheet=${googleSheet}, canva=${canva}
+            doc_file=${docFile}, google_sheet=${googleSheet}, canva=${canva},
+            start_date=${c.start_date || null}, end_date=${c.end_date || null},
+            order_details=${c.order_details || ""}, blog_status=${c.blog_status || "not_started"}
             where id=${c.id}`;
           await logActivity(sql, { actor, verb: "updated client", entity: "client", entity_label: c.name, client_id: c.id });
         } else {
           const ins = await sql`insert into clients
-            (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes, gsc_property, email, doc_file, google_sheet, canva, created_by)
+            (name, niche, status, source, package, fee, team_member, start_month, renewal_month, risk, notes, gsc_property, email, doc_file, google_sheet, canva, start_date, end_date, order_details, blog_status, created_by)
             values (${c.name}, ${c.niche || ""}, ${c.status || "active"}, ${c.source || "Direct"},
                     ${c.package || "Standard"}, ${Number(c.fee) || 0}, ${c.team_member || ""},
                     ${c.start_month || ""}, ${c.renewal_month || ""}, ${c.risk || "low"},
-                    ${c.notes || ""}, ${gscProperty}, ${c.email || ""}, ${docFile}, ${googleSheet}, ${canva}, ${auth.name || c.created_by || ""}) returning id`;
+                    ${c.notes || ""}, ${gscProperty}, ${c.email || ""}, ${docFile}, ${googleSheet}, ${canva},
+                    ${c.start_date || null}, ${c.end_date || null}, ${c.order_details || ""}, ${c.blog_status || "not_started"}, ${auth.name || c.created_by || ""}) returning id`;
           // A new client with a monthly fee gets a pending payment row for the
           // current month right away, so Revenue reflects money that's owed
           // without waiting for someone to open the Revenue tab.
