@@ -31,6 +31,13 @@ create table if not exists clients (
 -- (mirroring netlify/functions/data.js) so existing databases upgrade in place.
 alter table clients add column if not exists gsc_property text default '';
 
+-- Per-client reference links (doc file / google sheet / Canva), shown as
+-- clickable icons on the Clients table. Kept as ALTERs (mirroring
+-- netlify/functions/data.js) so existing databases upgrade in place.
+alter table clients add column if not exists doc_file text default '';
+alter table clients add column if not exists google_sheet text default '';
+alter table clients add column if not exists canva text default '';
+
 create table if not exists tasks (
   id uuid primary key default gen_random_uuid(),
   client_id uuid references clients(id) on delete cascade,

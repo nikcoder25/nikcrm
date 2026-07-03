@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useDeferredValue } from "react";
-import { Pencil, Trash2, Download, Search, Plus } from "lucide-react";
+import { Pencil, Trash2, Download, Search, Plus, FileText, Sheet, Palette } from "lucide-react";
 import { ink, accent, tint, btn, iconBtn, sel, input } from "../lib/theme";
 import { STATUSES, STATUS_LABEL } from "../lib/constants";
 import { downloadCsv, clientsCsv } from "../lib/csv";
@@ -67,9 +67,11 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
 
   const cell = { fontSize: 12.5, fontWeight: 700, minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" };
   const th = { fontSize: 10.5, fontWeight: 800, color: GRAY, textTransform: "uppercase", letterSpacing: "0.04em", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" };
-  // All columns are fluid (minmax(0,…fr)) so the table always fits its container
-  // width — no horizontal scroll. Cells clip with ellipsis when space is tight.
-  const GRID = "minmax(0,1.7fr) minmax(0,0.95fr) minmax(0,1.15fr) minmax(0,1fr) minmax(0,0.95fr) minmax(0,0.85fr) minmax(0,0.7fr) minmax(0,1fr) minmax(0,0.85fr) minmax(0,0.9fr) minmax(0,0.75fr) minmax(0,0.95fr) 66px";
+  const fileLink = { color: ink, display: "inline-flex" };
+  // Columns stay fluid so the table always fits its container width — no
+  // horizontal scroll. Badge columns (Status/Health/Source/Risk) carry a small
+  // px floor so their pills never clip; text columns shrink to an ellipsis.
+  const GRID = "minmax(0,1.6fr) minmax(74px,0.9fr) minmax(120px,1.1fr) minmax(0,1fr) minmax(0,0.9fr) minmax(76px,0.8fr) minmax(0,0.7fr) minmax(0,1fr) minmax(0,0.85fr) minmax(0,0.9fr) minmax(66px,0.72fr) minmax(0,0.9fr) 76px 66px";
 
   return (
     <div>
@@ -122,6 +124,7 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
             <span style={th}>Renewal</span>
             <span style={th}>Risk</span>
             <span style={th}>Deliverables</span>
+            <span style={th}>Files</span>
             <span />
           </div>
           {filtered.map((c) => {
@@ -140,7 +143,7 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
                 <span style={{ minWidth: 0, padding: "4px 6px", borderRadius: 7, fontSize: 11, fontWeight: 800, textAlign: "center", border: "2px solid " + ink, background: c.status === "active" ? accent : "#fff", color: c.status === "active" ? "#fff" : ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={STATUS_LABEL[c.status] || c.status}>
                   {STATUS_LABEL[c.status] || c.status}
                 </span>
-                <span style={{ minWidth: 0, overflow: "hidden", display: "block" }}><HealthBadge health={healthByClient.get(c.id)} size="sm" /></span>
+                <span style={{ minWidth: 0, display: "flex", alignItems: "center" }}><HealthBadge health={healthByClient.get(c.id)} size="sm" /></span>
                 <span style={{ ...cell, color: c.niche ? ink : MUTED }} title={c.niche}>{c.niche || "—"}</span>
                 <span style={{ ...cell, color: c.package ? GRAY : MUTED }} title={c.package}>{c.package || "—"}</span>
                 {c.source ? (
@@ -158,6 +161,12 @@ export default function Clients({ clients, deliverables = [], payments = [], tas
                     {dels.delivered}/{dels.total}
                   </span>
                 ) : <span style={{ ...cell, color: MUTED }}>—</span>}
+                <span style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}>
+                  {c.doc_file ? <a href={c.doc_file} target="_blank" rel="noopener noreferrer" title="Doc file" style={fileLink}><FileText size={15} /></a> : null}
+                  {c.google_sheet ? <a href={c.google_sheet} target="_blank" rel="noopener noreferrer" title="Google sheet" style={fileLink}><Sheet size={15} /></a> : null}
+                  {c.canva ? <a href={c.canva} target="_blank" rel="noopener noreferrer" title="Canva" style={fileLink}><Palette size={15} /></a> : null}
+                  {!c.doc_file && !c.google_sheet && !c.canva ? <span style={{ color: MUTED }}>—</span> : null}
+                </span>
                 <span style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
                   <button style={{ ...iconBtn, padding: 5 }} title="Edit" aria-label={`Edit ${c.name}`} onClick={() => onEdit(c)}><Pencil size={13} /></button>
                   {isAdmin && <button style={{ ...iconBtn, padding: 5 }} title="Delete" aria-label={`Delete ${c.name}`} onClick={() => onDelete(c.id)}><Trash2 size={13} /></button>}

@@ -40,6 +40,9 @@ export const clientsCsv = (clients) => toCsv(clients, [
   { header: "Renewal Month", value: (c) => c.renewal_month },
   { header: "Risk", value: (c) => c.risk },
   { header: "Notes", value: (c) => c.notes },
+  { header: "Doc File", value: (c) => c.doc_file || "" },
+  { header: "Google Sheet", value: (c) => c.google_sheet || "" },
+  { header: "Canva", value: (c) => c.canva || "" },
 ]);
 
 export const deliverablesCsv = (deliverables, clients) => {
