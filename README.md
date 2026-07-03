@@ -76,12 +76,12 @@ Everything else (Stripe billing, Search Console, automatic rank checks, report/d
 The app is fully functional without this. One Google OAuth client (and **one** redirect URI) powers two separate things:
 
 - **Sign in with Google (SSO)** — a third option on the login screen. It only asks for `openid email profile`, matches an **existing** account in the Team tab by the Google email (accounts are never auto-created), and issues the same signed session token as the email/password login.
-- **Per-user Gmail + Calendar** — each teammate connects **their own** Google account from **Settings** (a separate consent asking for read-only Gmail + Calendar events). Gmail imports and Calendar pushes then run as the current user. A legacy **workspace fallback** account (admin-connected) is still supported and is used for anyone who hasn't connected their own; a personal connection always takes precedence. All tokens are stored server-side in the database, per user — never sent to the browser.
+- **Per-user Gmail + Calendar + Search Console** — each teammate connects **their own** Google account from **Settings** (a separate consent asking for read-only Gmail, Calendar events, and read-only Search Console). Gmail imports and Calendar pushes then run as the current user. On the **Websites** tab, each user imports any of **their** Search Console sites to a personal dashboard (clicks, impressions, CTR, position, top queries), and on a client page they can attach one of their sites to power that client's **Organic search** panel and monthly report — fetched with their token, cached server-side. A legacy **workspace fallback** account (admin-connected) is still supported for Gmail/Calendar, and the old **service-account** Search Console sync (`GSC_SERVICE_ACCOUNT_JSON` + nightly `gsc-sync`) keeps working for clients without an attached site; a per-user attachment always takes precedence. All tokens are stored server-side in the database, per user — never sent to the browser.
 
 **1. Create an OAuth client in Google Cloud**
 - In the [Google Cloud Console](https://console.cloud.google.com/): create (or pick) a project.
-- **APIs & Services → Enabled APIs & services → + Enable APIs** — enable the **Gmail API** and the **Google Calendar API**.
-- **APIs & Services → OAuth consent screen** — configure it (External is fine), and add these scopes: `openid`, `email`, `profile`, `.../auth/gmail.readonly`, `.../auth/calendar.events`. While the app is in "Testing", add the Google accounts that will sign in / connect as **Test users**.
+- **APIs & Services → Enabled APIs & services → + Enable APIs** — enable the **Gmail API**, the **Google Calendar API**, and the **Google Search Console API**.
+- **APIs & Services → OAuth consent screen** — configure it (External is fine), and add these scopes: `openid`, `email`, `profile`, `.../auth/gmail.readonly`, `.../auth/calendar.events`, `.../auth/webmasters.readonly`. While the app is in "Testing", add the Google accounts that will sign in / connect as **Test users**.
 - **APIs & Services → Credentials → + Create credentials → OAuth client ID → Web application.**
   - **Authorized redirect URIs**: add exactly one — `<API-ORIGIN>/api/google`. On the Cloudflare deployment that is the **Worker** origin (e.g. `https://growth-atlas-api.YOURNAME.workers.dev/api/google`), NOT the static site; on Netlify it's the site origin (e.g. `https://your-site.netlify.app/api/google`). Every flow (sign-in and connect) goes through this single URI — they're told apart by the OAuth `state`.
 - Copy the **Client ID** and **Client secret**.
@@ -95,8 +95,9 @@ The app is fully functional without this. One Google OAuth client (and **one** r
 
 **3. Use it**
 - **Sign in**: login screen → **Google** → Continue with Google. Works for anyone whose email an admin added in the **Team** tab; others see "No account for this Google email".
-- **Connect Gmail/Calendar**: **Settings** → **Connect your Google account** (any signed-in personal account; the shared team-password login has no profile to attach to). Admins can also connect/disconnect the workspace fallback there.
+- **Connect Gmail/Calendar/Search Console**: **Settings** → **Connect your Google account** (any signed-in personal account; the shared team-password login has no profile to attach to). Admins can also connect/disconnect the workspace fallback there.
 - Then on any client page: set the client's **Contact email** (in the client form) to enable **Sync Gmail**, and use **Add to Google Calendar** on any follow-up or meeting.
+- **Search Console**: open the **Websites** tab to import any of your sites into a personal dashboard, and on a client's SEO tab use **Attach your site** on the Organic search panel to power that client's data with your connection (Detach any time; the service-account path takes over again if configured).
 
 **Notes & limits**
 - Signing in with Google never asks for mailbox access; the Gmail/Calendar consent is a separate, explicit step. Gmail access is **read-only**; Calendar access is limited to **events** the app creates. Disconnecting (Settings) deletes your stored tokens; deleting a user deletes theirs.

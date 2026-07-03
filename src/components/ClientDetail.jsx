@@ -11,8 +11,10 @@ import { deliverableMonth } from "../lib/scope";
 import {
   addResourceLink, uploadResourceFile, deleteResource, fetchFileObjectUrl, MAX_FILE_BYTES,
   createKeyword, updateKeyword, deleteKeyword,
-  getPortalToken, createPortalToken, setPortalTokenEnabled, getReportEmail, setReportEmail, gscLoad,
+  getPortalToken, createPortalToken, setPortalTokenEnabled, getReportEmail, setReportEmail,
 } from "../lib/api";
+import { gscClientData, gscSites, gscAttach, gscDetach } from "../lib/google";
+import { GSC_GRAY, GSC_RED, gscDay, gscWindows, pctChange, GscStat, GscClicksChart, GscQueriesTable } from "./GscBits";
 import { useToast } from "../lib/toast";
 import { computeHealth } from "../lib/health";
 import { Empty, HealthBadge } from "./ui";
@@ -51,109 +53,62 @@ export const CLIENT_TABS = [
 ];
 
 /* ---------------- Google Search Console panel ----------------
-   Lazily fetches this client's organic performance (filled nightly by the
-   gsc-sync scheduled function) once a Search Console property is linked. */
+   Organic performance for this client. Two data paths, resolved server-side:
+   a per-user attached Search Console site (fetched with the attaching user's
+   OAuth token, cached) wins; otherwise the legacy service-account tables
+   (filled nightly by gsc-sync) still power the panel. */
 
-const GSC_GREEN = "#1f9d57";
-const GSC_RED = "#c0392b";
-const GSC_GRAY = "#6b6580";
-
-// Normalize a gsc_daily row: date as 'YYYY-MM-DD', numbers as numbers.
-const gscDay = (d) => ({
-  date: String(d.date).slice(0, 10),
-  clicks: Number(d.clicks) || 0,
-  impressions: Number(d.impressions) || 0,
-});
-
-// Clicks + impressions for the last 28 days of data vs the 28 days before,
-// anchored on the latest synced date (GSC data lags ~2 days). The previous
-// window only counts as comparable once it holds at least 14 days of rows.
-function gscWindows(daily) {
-  if (!daily.length) return null;
-  const last = new Date(daily[daily.length - 1].date + "T00:00:00Z").getTime();
-  const cur = { clicks: 0, impressions: 0 };
-  const prev = { clicks: 0, impressions: 0 };
-  let prevDays = 0;
-  for (const d of daily) {
-    const age = Math.round((last - new Date(d.date + "T00:00:00Z").getTime()) / 86400000);
-    if (age < 28) { cur.clicks += d.clicks; cur.impressions += d.impressions; }
-    else if (age < 56) { prev.clicks += d.clicks; prev.impressions += d.impressions; prevDays += 1; }
-  }
-  return { cur, prev, comparable: prevDays >= 14 };
-}
-
-// "+12%" green / "-8%" red vs the previous window; null when not comparable.
-function pctChange(cur, prev, comparable) {
-  if (!comparable || !(prev > 0)) return null;
-  const pct = Math.round(((cur - prev) / prev) * 100);
-  return { label: `${pct > 0 ? "+" : ""}${pct}%`, color: pct > 0 ? GSC_GREEN : pct < 0 ? GSC_RED : GSC_GRAY };
-}
-
-function GscStat({ label, value, change }) {
-  return (
-    <div style={{ flex: 1, minWidth: 140, border: BDt, borderRadius: 10, padding: "10px 14px", background: "#faf8f2" }}>
-      <div style={{ fontSize: 10.5, fontWeight: 800, color: GSC_GRAY, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 3 }}>
-        <span style={{ fontSize: 20, fontWeight: 900, fontFamily: disp }}>{value.toLocaleString()}</span>
-        {change && <span style={{ fontSize: 12, fontWeight: 800, color: change.color }}>{change.label} vs prev 28d</span>}
-      </div>
-    </div>
-  );
-}
-
-// SVG line chart of daily clicks — same inline-SVG style as the rank chart in
-// Keywords.jsx, but with a normal y-axis (0 at the bottom, clicks up).
-function GscClicksChart({ daily, width = 620, height = 150 }) {
-  const pts = daily.map((d) => ({ v: d.clicks, t: new Date(d.date + "T00:00:00Z").getTime() }));
-  if (pts.length < 2) return null;
-  const max = Math.max(1, ...pts.map((p) => p.v));
-  const padL = 42, padR = 12, padT = 10, padB = 24;
-  const iw = width - padL - padR, ih = height - padT - padB;
-  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
-  const x = (t) => padL + (t1 > t0 ? (t - t0) / (t1 - t0) : 0.5) * iw;
-  const y = (v) => padT + (1 - v / max) * ih;
-  const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
-  const yTicks = [...new Set([0, Math.round(max / 2), max])];
-  const nX = Math.max(2, Math.min(5, pts.length));
-  const xTicks = Array.from({ length: nX }, (_, i) => t0 + (i / (nX - 1)) * Math.max(1, t1 - t0));
-  const fmtTick = (t) => new Date(t).toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" });
-  return (
-    <svg width={width} height={height} style={{ display: "block", overflow: "visible" }}>
-      {yTicks.map((v) => (
-        <g key={`y${v}`}>
-          <line x1={padL} x2={width - padR} y1={y(v)} y2={y(v)} stroke="#e8e4d8" strokeWidth="1" />
-          <text x={padL - 7} y={y(v) + 3.5} textAnchor="end" fontSize="10" fontWeight="700" fill={GSC_GRAY}>{v.toLocaleString()}</text>
-        </g>
-      ))}
-      {xTicks.map((t, i) => (
-        <text key={`x${i}`} x={x(t)} y={height - 8} textAnchor="middle" fontSize="10" fontWeight="700" fill={GSC_GRAY}>{fmtTick(t)}</text>
-      ))}
-      <path d={d} fill="none" stroke={accent} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={x(pts[pts.length - 1].t)} cy={y(pts[pts.length - 1].v)} r="2.5" fill={accent} />
-    </svg>
-  );
-}
-
-function GscPanel({ client }) {
-  // null = loading; { error } = failed; otherwise { daily, queries, month }.
+function GscPanel({ client, onChanged }) {
+  // null = loading; { error } = failed; otherwise { source, site_url, daily, queries, month }.
   const [gsc, setGsc] = useState(null);
-  const linked = Boolean(String(client.gsc_property || "").trim());
+  // null = picker closed; [] .. = the current user's Search Console sites.
+  const [sites, setSites] = useState(null);
+  const [pick, setPick] = useState("");
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const serviceLinked = Boolean(String(client.gsc_property || "").trim());
 
-  useEffect(() => {
-    if (!linked) return;
-    let alive = true;
+  const load = () => {
     setGsc(null);
-    gscLoad(client.id)
+    return gscClientData(client.id)
+      .then(setGsc)
+      .catch((e) => setGsc({ error: e?.message || "Could not load Search Console data." }));
+  };
+  useEffect(() => {
+    let alive = true;
+    setGsc(null); setSites(null); setPick("");
+    gscClientData(client.id)
       .then((r) => { if (alive) setGsc(r); })
       .catch((e) => { if (alive) setGsc({ error: e?.message || "Could not load Search Console data." }); });
     return () => { alive = false; };
-  }, [client.id, linked]);
+  }, [client.id]);
 
+  const openPicker = async () => {
+    setBusy(true);
+    try { const r = await gscSites(); setSites(r.sites || []); }
+    catch (e) { toast(e?.message || "Could not list your Search Console sites.", "error"); }
+    setBusy(false);
+  };
+  const attach = async () => {
+    if (!pick) return;
+    setBusy(true);
+    try { await gscAttach(client.id, pick); setSites(null); setPick(""); toast("Search Console site attached"); onChanged?.(); await load(); }
+    catch (e) { toast(e?.message || "Could not attach the site.", "error"); }
+    setBusy(false);
+  };
+  const detach = async () => {
+    if (!window.confirm("Detach this Search Console site? The panel falls back to the service-account sync (if configured).")) return;
+    setBusy(true);
+    try { await gscDetach(client.id); toast("Site detached"); await load(); }
+    catch (e) { toast(e?.message || "Could not detach the site.", "error"); }
+    setBusy(false);
+  };
+
+  const attached = gsc && !gsc.error && gsc.source === "user";
   const hint = { fontSize: 12.5, fontWeight: 600, color: GSC_GRAY };
+
   let body;
-  if (!linked) {
-    body = <span style={hint}>Set the Search Console property on this client (Edit → “Search Console property”, e.g. <b>sc-domain:example.com</b>) and add the service account as a user in GSC to see organic clicks and impressions here.</span>;
-  } else if (gsc === null) {
+  if (gsc === null) {
     body = <span style={hint}>Loading…</span>;
   } else if (gsc.error) {
     body = <span style={{ ...hint, color: GSC_RED }}>{gsc.error}</span>;
@@ -161,10 +116,12 @@ function GscPanel({ client }) {
     const daily = (gsc.daily || []).map(gscDay);
     const w = gscWindows(daily);
     if (!w) {
-      body = <span style={hint}>Property linked ({client.gsc_property}). No data yet — it arrives after the nightly Search Console sync.</span>;
+      body = attached
+        ? <span style={hint}>Site attached ({gsc.site_url}). No Search Analytics rows yet — new sites can take a couple of days to report.</span>
+        : serviceLinked
+          ? <span style={hint}>Property linked ({client.gsc_property}). No data yet — it arrives after the nightly Search Console sync.</span>
+          : <span style={hint}>Connect your Google account in Settings, then attach one of <b>your</b> Search Console sites here — or set a Search Console property on this client (Edit) for the service-account sync.</span>;
     } else {
-      const queries = gsc.queries || [];
-      const th = { padding: "6px 8px", fontSize: 10.5, fontWeight: 800, color: GSC_GRAY, textTransform: "uppercase", letterSpacing: "0.04em" };
       body = (
         <>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
@@ -177,33 +134,7 @@ function GscPanel({ client }) {
               <div className="scroll-x"><GscClicksChart daily={daily} /></div>
             </div>
           )}
-          {queries.length > 0 && (
-            <div>
-              <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 6 }}>Top queries{gsc.month ? ` — ${gsc.month}` : ""}</div>
-              <div className="scroll-x" style={{ border: BDt, borderRadius: 10 }}>
-                <table style={{ width: "100%", minWidth: 440, borderCollapse: "collapse", fontSize: 12.5 }}>
-                  <thead>
-                    <tr style={{ textAlign: "left", borderBottom: BDt, background: "#faf8f2" }}>
-                      <th style={th}>Query</th>
-                      <th style={{ ...th, textAlign: "right" }}>Clicks</th>
-                      <th style={{ ...th, textAlign: "right" }}>Impressions</th>
-                      <th style={{ ...th, textAlign: "right" }}>Avg position</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {queries.map((q) => (
-                      <tr key={q.query} style={{ borderBottom: "1px solid #f0ece2" }}>
-                        <td style={{ padding: "6px 8px", fontWeight: 700, wordBreak: "break-word" }}>{q.query}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 800 }}>{(Number(q.clicks) || 0).toLocaleString()}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", color: GSC_GRAY, fontWeight: 700 }}>{(Number(q.impressions) || 0).toLocaleString()}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 700 }}>{q.position == null ? "—" : Number(q.position).toFixed(1)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          <GscQueriesTable queries={gsc.queries || []} title={`Top queries${gsc.month ? ` — ${gsc.month}` : " — last 28 days"}`} />
         </>
       );
     }
@@ -211,8 +142,31 @@ function GscPanel({ client }) {
 
   return (
     <div className="no-print" style={{ marginTop: 22 }}>
-      <div style={secTitle}>
-        <BarChart3 size={16} /> Organic search (Google Search Console)
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ ...secTitle, marginBottom: 0, flex: 1, minWidth: 220 }}>
+          <BarChart3 size={16} /> Organic search (Google Search Console)
+        </div>
+        {attached ? (
+          <>
+            <span title={`Fetched with the attaching user's Google connection`}
+              style={{ fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 7, border: BDt, background: "#d7f5df", maxWidth: 260, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+              {gsc.site_url}
+            </span>
+            <button style={{ ...btn("#fff", ink), padding: "7px 11px", fontSize: 12 }} disabled={busy} onClick={detach}>Detach</button>
+          </>
+        ) : sites === null ? (
+          <button style={{ ...btn("#fff", ink), padding: "7px 11px", fontSize: 12 }} disabled={busy} onClick={openPicker}>
+            <Plus size={13} /> Attach your site
+          </button>
+        ) : (
+          <>
+            <select style={{ ...input, width: "auto", minWidth: 180, padding: "8px 10px", fontSize: 12.5 }} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Your Search Console sites">
+              <option value="">{sites.length ? "Pick one of your sites…" : "No sites on your account"}</option>
+              {sites.map((s) => <option key={s.site_url} value={s.site_url}>{s.site_url}</option>)}
+            </select>
+            <button style={{ ...btn(accent, "#fff"), padding: "7px 11px", fontSize: 12 }} disabled={busy || !pick} onClick={attach}>Attach</button>
+          </>
+        )}
       </div>
       {body}
     </div>

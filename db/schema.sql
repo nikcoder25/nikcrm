@@ -312,11 +312,11 @@ alter table oauth_states add column if not exists flow text default 'connect';
 alter table oauth_states add column if not exists user_id text default '';
 alter table oauth_states add column if not exists app_origin text default '';
 
--- Per-user Gmail/Calendar OAuth tokens (one row per connected user account).
--- Server-side only, never sent to the browser; takes precedence over the
--- workspace-wide `integrations` row. user_id is text (not a FK) on purpose:
--- google.js creates this table and must not depend on creation order with
--- `users`; rows are removed on disconnect and on user deletion.
+-- Per-user Gmail/Calendar/Search-Console OAuth tokens (one row per connected
+-- user account). Server-side only, never sent to the browser; takes precedence
+-- over the workspace-wide `integrations` row. user_id is text (not a FK) on
+-- purpose: google.js creates this table and must not depend on creation order
+-- with `users`; rows are removed on disconnect and on user deletion.
 create table if not exists user_google_tokens (
   user_id text primary key,
   access_token text default '',
@@ -325,6 +325,35 @@ create table if not exists user_google_tokens (
   scope text default '',
   account_email text default '',
   updated_at timestamptz default now()
+);
+
+-- Search Console sites a user imported into their Websites dashboard.
+create table if not exists user_gsc_sites (
+  user_id text not null,
+  site_url text not null,
+  added_at timestamptz default now(),
+  primary key (user_id, site_url)
+);
+
+-- Which Search Console site powers a client's "Organic search" panel, and
+-- whose per-user OAuth token fetches it. Takes precedence over the
+-- service-account path (clients.gsc_property + gsc_daily/gsc_queries). No FK
+-- to clients — the table is owned by google.js and must not depend on
+-- creation order; data.js removes the row when the client is deleted.
+create table if not exists client_gsc_sites (
+  client_id uuid primary key,
+  site_url text not null,
+  user_id text not null,
+  updated_at timestamptz default now()
+);
+
+-- Per-site Search Analytics cache (JSON payload: daily series + top queries).
+-- Bounds Google API calls to at most two per site per TTL, which also keeps
+-- any one Cloudflare Worker invocation far below its 50-subrequest limit.
+create table if not exists gsc_cache (
+  site_url text primary key,
+  payload text default '',
+  fetched_at timestamptz default now()
 );
 
 -- ============================================================

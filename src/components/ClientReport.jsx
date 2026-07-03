@@ -6,7 +6,8 @@ import { ym, ymLabel } from "../lib/format";
 import { keywordSummary, movement } from "./Keywords";
 import { aiCitationSummary } from "./AiVisibility";
 import { scopeRows, deliverableMonth } from "../lib/scope";
-import { saveReport, gscLoad } from "../lib/api";
+import { saveReport } from "../lib/api";
+import { gscClientData } from "../lib/google";
 import { useToast } from "../lib/toast";
 import { Empty } from "./ui";
 
@@ -57,14 +58,15 @@ export default function ClientReport({ client, keywords = [], deliverables = [],
   }, [month]);
 
   // Search Console data for the selected month (daily covers ~90 days, so the
-  // previous month is usually in there too). Only fetched once the client is
-  // linked to a GSC property; failures just hide the section.
+  // previous month is usually in there too). Served by the per-user attached
+  // site when there is one, else the service-account tables; failures just
+  // hide the section. Always fetched — the server knows about attachments the
+  // client row doesn't reflect.
   const [gsc, setGsc] = useState(null);
   useEffect(() => {
     setGsc(null);
-    if (!String(client.gsc_property || "").trim()) return;
     let alive = true;
-    gscLoad(client.id, month)
+    gscClientData(client.id, month)
       .then((r) => { if (alive) setGsc(r); })
       .catch(() => {});
     return () => { alive = false; };

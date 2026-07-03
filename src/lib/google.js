@@ -30,3 +30,17 @@ export const pushToCalendar = (activity_id) => gcall("calendarPush", { activity_
 export const syncGmail = (client_id) => gcall("gmailSync", { client_id });
 // Public (no session yet): start "Sign in with Google" from the login screen.
 export const googleSsoUrl = () => gcall("ssoStart", { app_origin: window.location.origin });
+
+/* ---------------- Search Console (per-user) ----------------
+   Sites and Search Analytics fetched with the CURRENT USER's OAuth token
+   (server-side; the browser only ever sees the resulting numbers). */
+export const gscSites = () => gcall("gscSites");                                  // live list from Google
+export const gscSiteList = () => gcall("gscSiteList");                            // imported into Websites
+export const gscSiteAdd = (site_url) => gcall("gscSiteAdd", { site_url });
+export const gscSiteRemove = (site_url) => gcall("gscSiteRemove", { site_url });
+export const gscSiteData = (site_url, force = false) => gcall("gscSiteData", { site_url, force });
+export const gscAttach = (client_id, site_url) => gcall("gscAttach", { client_id, site_url });
+export const gscDetach = (client_id) => gcall("gscDetach", { client_id });
+// Organic data for a client: per-user attached site first, service-account
+// tables as the fallback. Replaces direct gscLoad calls in the client views.
+export const gscClientData = (client_id, month) => gcall("gscClientData", { client_id, month });

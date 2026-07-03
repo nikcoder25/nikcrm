@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Plug, Check, RefreshCw, Calendar, Mail, Loader, DatabaseBackup, Building2 } from "lucide-react";
+import { Plug, Check, RefreshCw, Calendar, Mail, Loader, DatabaseBackup, Building2, Globe } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, btn } from "../lib/theme";
 import { googleStatus, googleAuthUrl, googleDisconnect } from "../lib/google";
 import { backupExport } from "../lib/api";
@@ -78,9 +78,9 @@ export default function Settings({ isAdmin, name, onConnected }) {
 
         <div style={{ padding: 20 }}>
           <p style={{ fontSize: 13.5, fontWeight: 600, color: "#4b4560", lineHeight: 1.5, marginBottom: 16 }}>
-            Connect <b>your own</b> Google account — each teammate connects theirs. Gmail imports and Calendar pushes then run as you:
+            Connect <b>your own</b> Google account — each teammate connects theirs. Gmail imports, Calendar pushes and Search Console data then run as you:
           </p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12, marginBottom: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 12, marginBottom: 18 }}>
             <div style={{ border: BDt, borderRadius: 10, padding: "12px 14px", background: "#faf8f2" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 7, fontWeight: 800, fontSize: 13.5 }}><Mail size={15} /> Pull from Gmail</div>
               <div style={{ fontSize: 12.5, color: "#6b6580", fontWeight: 600, marginTop: 4 }}>Import recent emails to/from a client's contact address into their activity timeline.</div>
@@ -88,6 +88,10 @@ export default function Settings({ isAdmin, name, onConnected }) {
             <div style={{ border: BDt, borderRadius: 10, padding: "12px 14px", background: "#faf8f2" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 7, fontWeight: 800, fontSize: 13.5 }}><Calendar size={15} /> Push to Calendar</div>
               <div style={{ fontSize: 12.5, color: "#6b6580", fontWeight: 600, marginTop: 4 }}>Send a follow-up or meeting straight to Google Calendar from the client's timeline.</div>
+            </div>
+            <div style={{ border: BDt, borderRadius: 10, padding: "12px 14px", background: "#faf8f2" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, fontWeight: 800, fontSize: 13.5 }}><Globe size={15} /> Search Console</div>
+              <div style={{ fontSize: 12.5, color: "#6b6580", fontWeight: 600, marginTop: 4 }}>Import any of your websites on the Websites tab, and attach them to clients to power their Organic search panels.</div>
             </div>
           </div>
 
@@ -143,9 +147,10 @@ export default function Settings({ isAdmin, name, onConnected }) {
       </Panel>
 
       <div style={{ marginTop: 14, fontSize: 12, color: "#6b6580", fontWeight: 600, lineHeight: 1.5 }}>
-        Access is limited to the scopes shown on Google's consent screen (read-only Gmail and Calendar events).
-        Tokens are stored server-side, per user, and never sent to the browser. Disconnecting removes yours.
-        Signing in with Google (on the login screen) only ever asks for your email and profile — never your mailbox.
+        Access is limited to the scopes shown on Google's consent screen (read-only Gmail, Calendar events, and
+        read-only Search Console). Tokens are stored server-side, per user, and never sent to the browser.
+        Disconnecting removes yours. Signing in with Google (on the login screen) only ever asks for your email
+        and profile — never your mailbox or sites. Connected before Search Console was added? Reconnect once to grant it.
       </div>
 
       <div style={{ marginTop: 18 }}>

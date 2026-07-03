@@ -88,13 +88,15 @@ const OAUTH = {
 };
 // Sign in with Google: identity only — no mailbox or calendar access at login.
 const SSO_SCOPES = ["openid", "email", "profile"];
-// Per-user (and legacy workspace) Gmail + Calendar connect — a separate
-// consent flow from SSO.
+// Per-user (and legacy workspace) Gmail + Calendar + Search Console connect —
+// a separate consent flow from SSO. Users who connected before the Search
+// Console scope was added reconnect once to grant it.
 const CONNECT_SCOPES = [
   "openid",
   "email",
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/webmasters.readonly",
 ];
 
 function googleConfigured() { return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET); }
@@ -198,6 +200,30 @@ async function ensureSchema(sql) {
   // never run there; `if exists` covers a fresh DB where users doesn't exist yet.
   await sql`alter table if exists users add column if not exists google_sub text default ''`;
   await sql`alter table if exists users add column if not exists google_email text default ''`;
+  // Search Console sites a user imported into their Websites dashboard.
+  await sql`create table if not exists user_gsc_sites (
+    user_id text not null,
+    site_url text not null,
+    added_at timestamptz default now(),
+    primary key (user_id, site_url)
+  )`;
+  // Which Search Console site powers a client's "Organic search" panel, and
+  // whose per-user OAuth token fetches it. No FK to clients (created by
+  // data.js, possibly later); data.js cleans this up on client deletion.
+  await sql`create table if not exists client_gsc_sites (
+    client_id uuid primary key,
+    site_url text not null,
+    user_id text not null,
+    updated_at timestamptz default now()
+  )`;
+  // Per-site Search Analytics cache (JSON payload). Fetches go to Google at
+  // most once per TTL per site, keeping any one invocation to ~2 Google calls
+  // — well inside Cloudflare's 50-subrequest budget.
+  await sql`create table if not exists gsc_cache (
+    site_url text primary key,
+    payload text default '',
+    fetched_at timestamptz default now()
+  )`;
   schemaReady = true;
 }
 
@@ -226,6 +252,26 @@ async function refreshedToken(refreshToken) {
   return { token: data.access_token, expiry };
 }
 
+// Valid access token from a user_google_tokens row, refreshing when within
+// 60s of expiry.
+async function freshUserToken(sql, userId, row) {
+  const expMs = row.token_expiry ? new Date(row.token_expiry).getTime() : 0;
+  if (row.access_token && expMs - Date.now() > 60_000) return row.access_token;
+  const { token, expiry } = await refreshedToken(row.refresh_token);
+  await sql`update user_google_tokens set access_token=${token}, token_expiry=${expiry}, updated_at=now() where user_id=${userId}`;
+  return token;
+}
+
+// STRICTLY the given user's token — no workspace fallback. Search Console
+// calls use this: the workspace token was never granted the webmasters scope.
+async function getUserAccessToken(sql, userId) {
+  const rows = userId
+    ? await sql`select access_token, refresh_token, token_expiry from user_google_tokens where user_id=${userId} limit 1`
+    : [];
+  if (!rows.length || !rows[0].refresh_token) throw new Error("Connect your Google account in Settings first.");
+  return freshUserToken(sql, userId, rows[0]);
+}
+
 // Return a currently-valid access token for this session, refreshing when
 // within 60s of expiry. The CURRENT USER's connection wins; the legacy
 // workspace-wide row is the fallback so existing installs keep working.
@@ -233,14 +279,7 @@ async function refreshedToken(refreshToken) {
 async function getAccessToken(sql, userId) {
   if (userId) {
     const rows = await sql`select access_token, refresh_token, token_expiry from user_google_tokens where user_id=${userId} limit 1`;
-    if (rows.length && rows[0].refresh_token) {
-      const row = rows[0];
-      const expMs = row.token_expiry ? new Date(row.token_expiry).getTime() : 0;
-      if (row.access_token && expMs - Date.now() > 60_000) return row.access_token;
-      const { token, expiry } = await refreshedToken(row.refresh_token);
-      await sql`update user_google_tokens set access_token=${token}, token_expiry=${expiry}, updated_at=now() where user_id=${userId}`;
-      return token;
-    }
+    if (rows.length && rows[0].refresh_token) return freshUserToken(sql, userId, rows[0]);
   }
   const rows = await sql`select access_token, refresh_token, token_expiry from integrations where provider='google' limit 1`;
   if (!rows.length || !rows[0].refresh_token) throw new Error("Connect your Google account in Settings first.");
@@ -250,6 +289,68 @@ async function getAccessToken(sql, userId) {
   const { token, expiry } = await refreshedToken(row.refresh_token);
   await sql`update integrations set access_token=${token}, token_expiry=${expiry}, updated_at=now() where provider='google'`;
   return token;
+}
+
+/* ---------------- Search Console (per-user OAuth) ----------------
+   Data flows: a user imports their sites into the Websites dashboard, or
+   attaches one of their sites to a client. Search Analytics results are
+   cached per site in gsc_cache so any one request makes at most two Google
+   calls (daily series + top queries); everything else reads the cache. */
+
+const GSC_API = "https://www.googleapis.com/webmasters/v3";
+const GSC_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // GSC data lags ~2 days; 6h is plenty fresh
+
+const gscDaysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+
+// The user's verified Search Console properties.
+async function gscListSites(token) {
+  const data = await gapi(token, `${GSC_API}/sites`);
+  return (data.siteEntry || [])
+    .filter((s) => s.permissionLevel && s.permissionLevel !== "siteUnverifiedUser")
+    .map((s) => ({ site_url: s.siteUrl, permission: s.permissionLevel }))
+    .sort((a, b) => a.site_url.localeCompare(b.site_url));
+}
+
+async function gscSearchAnalytics(token, siteUrl, body) {
+  const data = await gapi(token, `${GSC_API}/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return Array.isArray(data.rows) ? data.rows : [];
+}
+
+const gscNum = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+
+// Site data (daily series ~90d + top queries 28d) from the cache, refetched
+// with the OWNER user's token when stale. Shape matches what the frontend's
+// organic panels already consume: {daily, queries, month} (month is null —
+// per-user queries are a rolling 28-day window, not calendar-month buckets).
+async function gscSiteData(sql, ownerUserId, siteUrl, force = false) {
+  const cached = await sql`select payload, fetched_at from gsc_cache where site_url=${siteUrl} limit 1`;
+  if (!force && cached.length && Date.now() - new Date(cached[0].fetched_at).getTime() < GSC_CACHE_TTL_MS) {
+    try { return JSON.parse(cached[0].payload); } catch { /* corrupt — refetch */ }
+  }
+  const token = await getUserAccessToken(sql, ownerUserId);
+  const [dailyRows, queryRows] = await Promise.all([
+    gscSearchAnalytics(token, siteUrl, { startDate: gscDaysAgo(90), endDate: gscDaysAgo(1), dimensions: ["date"], rowLimit: 500 }),
+    gscSearchAnalytics(token, siteUrl, { startDate: gscDaysAgo(28), endDate: gscDaysAgo(1), dimensions: ["query"], rowLimit: 15 }),
+  ]);
+  const data = {
+    daily: dailyRows.map((r) => ({
+      date: String(r.keys?.[0] || "").slice(0, 10),
+      clicks: gscNum(r.clicks), impressions: gscNum(r.impressions),
+      ctr: gscNum(r.ctr), position: gscNum(r.position),
+    })),
+    queries: queryRows.map((r) => ({
+      query: String(r.keys?.[0] || ""),
+      clicks: gscNum(r.clicks), impressions: gscNum(r.impressions), position: gscNum(r.position),
+    })),
+    month: null,
+  };
+  await sql`insert into gsc_cache (site_url, payload, fetched_at) values (${siteUrl}, ${JSON.stringify(data)}, now())
+    on conflict (site_url) do update set payload=excluded.payload, fetched_at=now()`;
+  return data;
 }
 
 async function gapi(token, url, init = {}) {
@@ -478,6 +579,105 @@ export default async (req) => {
         if (!auth.userId) return json({ error: "This session has no personal Google connection." }, 400);
         await sql`delete from user_google_tokens where user_id=${auth.userId}`;
         return json({ ok: true });
+      }
+
+      /* ---------- Search Console (per-user) ---------- */
+
+      case "gscSites": {
+        // The CURRENT user's verified Search Console properties (live from
+        // Google — used by pickers, so it should never be stale).
+        const token = await getUserAccessToken(sql, auth.userId);
+        return json({ sites: await gscListSites(token) });
+      }
+
+      case "gscSiteList": {
+        // Sites the current user imported into their Websites dashboard.
+        if (!auth.userId) return json({ sites: [] });
+        const sites = await sql`select site_url, added_at from user_gsc_sites where user_id=${auth.userId} order by site_url`;
+        return json({ sites });
+      }
+
+      case "gscSiteAdd": {
+        const siteUrl = String(payload.site_url || "").trim();
+        if (!siteUrl) return json({ error: "Missing site URL." }, 400);
+        if (!auth.userId) return json({ error: "Sign in with your personal account (My account or Google) first." }, 400);
+        // Only sites actually on the user's Search Console account.
+        const token = await getUserAccessToken(sql, auth.userId);
+        const sites = await gscListSites(token);
+        if (!sites.some((s) => s.site_url === siteUrl)) return json({ error: "That site isn't on your Search Console account." }, 400);
+        await sql`insert into user_gsc_sites (user_id, site_url) values (${auth.userId}, ${siteUrl}) on conflict do nothing`;
+        return json({ ok: true });
+      }
+
+      case "gscSiteRemove": {
+        if (!auth.userId) return json({ error: "This session has no imported sites." }, 400);
+        await sql`delete from user_gsc_sites where user_id=${auth.userId} and site_url=${String(payload.site_url || "")}`;
+        return json({ ok: true });
+      }
+
+      case "gscSiteData": {
+        // Search Analytics for one of the current user's imported sites
+        // (cached per site; at most two Google calls when stale).
+        const siteUrl = String(payload.site_url || "").trim();
+        if (!siteUrl) return json({ error: "Missing site URL." }, 400);
+        if (!auth.userId) return json({ error: "Sign in with your personal account first." }, 400);
+        const mine = await sql`select site_url from user_gsc_sites where user_id=${auth.userId} and site_url=${siteUrl} limit 1`;
+        if (!mine.length) return json({ error: "Import this site on the Websites tab first." }, 404);
+        const data = await gscSiteData(sql, auth.userId, siteUrl, Boolean(payload.force));
+        return json(data);
+      }
+
+      case "gscAttach": {
+        // Attach one of the CURRENT user's Search Console sites to a client;
+        // that user's token then powers the client's organic-search panels.
+        if (!payload.client_id) return json({ error: "Missing client." }, 400);
+        const siteUrl = String(payload.site_url || "").trim();
+        if (!siteUrl) return json({ error: "Missing site URL." }, 400);
+        if (!auth.userId) return json({ error: "Sign in with your personal account (My account or Google) and connect Google in Settings first." }, 400);
+        const token = await getUserAccessToken(sql, auth.userId);
+        const sites = await gscListSites(token);
+        if (!sites.some((s) => s.site_url === siteUrl)) return json({ error: "That site isn't on your Search Console account." }, 400);
+        await sql`insert into client_gsc_sites (client_id, site_url, user_id, updated_at)
+          values (${payload.client_id}, ${siteUrl}, ${auth.userId}, now())
+          on conflict (client_id) do update set site_url=excluded.site_url, user_id=excluded.user_id, updated_at=now()`;
+        return json({ ok: true });
+      }
+
+      case "gscDetach": {
+        if (!payload.client_id) return json({ error: "Missing client." }, 400);
+        await sql`delete from client_gsc_sites where client_id=${payload.client_id}`;
+        return json({ ok: true });
+      }
+
+      case "gscClientData": {
+        // Organic-search data for one client. A per-user attached site takes
+        // precedence; otherwise fall back to the service-account tables that
+        // gsc-sync.mjs fills nightly (the pre-existing path, unchanged).
+        if (!payload.client_id) return json({ error: "Missing client." }, 400);
+        const map = await sql`select site_url, user_id from client_gsc_sites where client_id=${payload.client_id} limit 1`;
+        if (map.length) {
+          const data = await gscSiteData(sql, map[0].user_id, map[0].site_url, Boolean(payload.force));
+          return json({ source: "user", site_url: map[0].site_url, ...data });
+        }
+        // gsc_daily / gsc_queries belong to data.js's schema; on a fresh DB
+        // where only this handler has run they may not exist yet.
+        try {
+          const daily = await sql`select date, clicks, impressions, ctr, position from gsc_daily
+            where client_id=${payload.client_id} and date >= current_date - 90 order by date`;
+          let month = String(payload.month || "").trim();
+          if (!month) {
+            const latest = await sql`select max(month) as month from gsc_queries where client_id=${payload.client_id}`;
+            month = latest[0]?.month || "";
+          }
+          const queries = month
+            ? await sql`select query, clicks, impressions, position from gsc_queries
+                where client_id=${payload.client_id} and month=${month}
+                order by clicks desc, impressions desc, query`
+            : [];
+          return json({ source: "service", site_url: "", daily, queries, month: month || null });
+        } catch {
+          return json({ source: "service", site_url: "", daily: [], queries: [], month: null });
+        }
       }
 
       case "calendarPush": {

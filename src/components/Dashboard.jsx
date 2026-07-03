@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles, Menu, X, Settings as SettingsIcon, TrendingUp } from "lucide-react";
+import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardList, Search, LayoutDashboard, History, Link2, Sparkles, Menu, X, Settings as SettingsIcon, TrendingUp, Globe } from "lucide-react";
 import * as api from "../lib/api";
 import { ink, accent, cream, disp, BD, BDt, SHs, tint, btn, iconBtn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
@@ -18,6 +18,7 @@ import Revenue from "./Revenue";
 import Team from "./Team";
 import ClientForm from "./ClientForm";
 import ClientDetail from "./ClientDetail";
+import Websites from "./Websites";
 import CommandPalette from "./CommandPalette";
 import Settings from "./Settings";
 import { googleStatus } from "../lib/google";
@@ -266,6 +267,7 @@ export default function Dashboard({ session, onSignOut }) {
     { k: "deliverables", l: "Deliverables", i: ClipboardList },
     { k: "backlinks", l: "Backlinks", i: Link2 },
     { k: "keywords", l: "Rank Tracker", i: TrendingUp },
+    { k: "websites", l: "Websites", i: Globe },
     { k: "ai", l: "AI Visibility", i: Sparkles },
     { k: "revenue", l: "Revenue", i: DollarSign },
     { k: "activity", l: "Activity", i: History },
@@ -379,6 +381,7 @@ export default function Dashboard({ session, onSignOut }) {
                 tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onSave={saveDeliverable} onStatus={statusDeliverable} onDelete={delDeliverable} onGenerate={generateDeliverables} /> :
                 tab === "backlinks" ? <Backlinks clients={clients} backlinks={backlinks} onCreate={createBacklink} onUpdate={updateBacklink} onDelete={delBacklink} /> :
                 tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
+                tab === "websites" ? <Websites /> :
                 tab === "ai" ? <AiVisibility clients={clients} citations={aiCitations} onCreate={createAiCitation} onUpdate={updateAiCitation} onDelete={delAiCitation} /> :
                 tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
                 tab === "activity" ? <ActivityLog items={activity} clients={clients} /> :

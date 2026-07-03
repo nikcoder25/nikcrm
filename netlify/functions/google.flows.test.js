@@ -11,6 +11,10 @@ const store = {
   users: [],                // { id, name, email, role, active, google_sub, google_email }
   userTokens: new Map(),    // user_id -> { access_token, refresh_token, token_expiry, account_email }
   integrations: null,       // workspace row or null
+  userSites: new Map(),     // user_id -> Set(site_url)   (user_gsc_sites)
+  clientSites: new Map(),   // client_id -> { site_url, user_id }   (client_gsc_sites)
+  gscCache: new Map(),      // site_url -> { payload, fetched_at }
+  gscDaily: [],             // service-account fallback rows
 };
 
 function sqlMock(strings, ...values) {
@@ -62,6 +66,39 @@ function sqlMock(strings, ...values) {
     return Promise.resolve([]);
   }
   if (q("delete from integrations")) { store.integrations = null; return Promise.resolve([]); }
+  /* ---- Search Console tables ---- */
+  if (q("insert into user_gsc_sites")) {
+    if (!store.userSites.has(values[0])) store.userSites.set(values[0], new Set());
+    store.userSites.get(values[0]).add(values[1]);
+    return Promise.resolve([]);
+  }
+  if (q("delete from user_gsc_sites")) { store.userSites.get(values[0])?.delete(values[1]); return Promise.resolve([]); }
+  if (q("select site_url, added_at from user_gsc_sites")) {
+    return Promise.resolve([...(store.userSites.get(values[0]) || [])].sort().map((s) => ({ site_url: s, added_at: "2026-01-01" })));
+  }
+  if (q("select site_url from user_gsc_sites")) {
+    return Promise.resolve(store.userSites.get(values[0])?.has(values[1]) ? [{ site_url: values[1] }] : []);
+  }
+  if (q("insert into client_gsc_sites")) {
+    store.clientSites.set(values[0], { site_url: values[1], user_id: values[2] });
+    return Promise.resolve([]);
+  }
+  if (q("delete from client_gsc_sites")) { store.clientSites.delete(values[0]); return Promise.resolve([]); }
+  if (q("select site_url, user_id from client_gsc_sites")) {
+    const row = store.clientSites.get(values[0]);
+    return Promise.resolve(row ? [row] : []);
+  }
+  if (q("select payload, fetched_at from gsc_cache")) {
+    const row = store.gscCache.get(values[0]);
+    return Promise.resolve(row ? [row] : []);
+  }
+  if (q("insert into gsc_cache")) {
+    store.gscCache.set(values[0], { payload: values[1], fetched_at: new Date().toISOString() });
+    return Promise.resolve([]);
+  }
+  if (q("from gsc_daily")) return Promise.resolve(store.gscDaily);
+  if (q("select max(month) as month from gsc_queries")) return Promise.resolve([{ month: "" }]);
+  if (q("from gsc_queries")) return Promise.resolve([]);
   throw new Error("sqlMock: unrouted query: " + text.slice(0, 120));
 }
 
@@ -70,6 +107,7 @@ const handler = (await import("./google.js")).default;
 
 // ---- Google endpoints mock ----
 const googleAccount = { id: "sub-123", email: "nik@agency.com" };
+const gscCalls = { analytics: 0 }; // counts Search Analytics fetches (cache assertions)
 vi.stubGlobal("fetch", async (url) => {
   const u = String(url);
   if (u.startsWith("https://oauth2.googleapis.com/token")) {
@@ -77,6 +115,20 @@ vi.stubGlobal("fetch", async (url) => {
   }
   if (u.startsWith("https://www.googleapis.com/oauth2/v2/userinfo")) {
     return new Response(JSON.stringify(googleAccount), { status: 200 });
+  }
+  if (u === "https://www.googleapis.com/webmasters/v3/sites") {
+    return new Response(JSON.stringify({ siteEntry: [
+      { siteUrl: "sc-domain:zetadental.com", permissionLevel: "siteOwner" },
+      { siteUrl: "https://acmemovers.com/", permissionLevel: "siteFullUser" },
+      { siteUrl: "sc-domain:unverified.com", permissionLevel: "siteUnverifiedUser" },
+    ] }), { status: 200 });
+  }
+  if (u.includes("/searchAnalytics/query")) {
+    gscCalls.analytics += 1;
+    return new Response(JSON.stringify({ rows: [
+      { keys: ["2026-07-01"], clicks: 12, impressions: 340, ctr: 0.035, position: 8.2 },
+      { keys: ["2026-07-02"], clicks: 15, impressions: 401, ctr: 0.037, position: 7.9 },
+    ] }), { status: 200 });
   }
   throw new Error("fetch mock: unrouted " + u);
 });
@@ -102,6 +154,11 @@ beforeEach(() => {
   store.states.clear();
   store.userTokens.clear();
   store.integrations = null;
+  store.userSites.clear();
+  store.clientSites.clear();
+  store.gscCache.clear();
+  store.gscDaily = [];
+  gscCalls.analytics = 0;
   store.users = [
     { id: "user-1", name: "Nik", email: "nik@agency.com", role: "admin", active: true, google_sub: "", google_email: "" },
     { id: "user-2", name: "Sara", email: "sara@agency.com", role: "member", active: true, google_sub: "", google_email: "" },
@@ -167,16 +224,22 @@ describe("Sign in with Google (SSO)", () => {
 });
 
 describe("Per-user Gmail/Calendar connect", () => {
-  it("authUrl for a personal session starts a connect_user flow with Gmail+Calendar scopes", async () => {
+  it("authUrl for a personal session starts a connect_user flow with Gmail+Calendar+Search Console scopes", async () => {
     const res = await post("authUrl", { app_origin: APP }, bearer("user-2"));
     expect(res.status).toBe(200);
     const { url } = await res.json();
     const u = new URL(url);
     expect(u.searchParams.get("scope")).toContain("gmail.readonly");
     expect(u.searchParams.get("scope")).toContain("calendar.events");
+    expect(u.searchParams.get("scope")).toContain("webmasters.readonly");
     expect(u.searchParams.get("access_type")).toBe("offline");
     const state = u.searchParams.get("state");
     expect(store.states.get(state)).toMatchObject({ flow: "connect_user", user_id: "user-2", app_origin: APP });
+  });
+
+  it("the SSO login flow does NOT request the Search Console scope", async () => {
+    const { url } = await (await post("ssoStart", { app_origin: APP })).json();
+    expect(new URL(url).searchParams.get("scope")).toBe("openid email profile");
   });
 
   it("authUrl for a shared-password session asks the user to sign in personally", async () => {
@@ -219,5 +282,82 @@ describe("Per-user Gmail/Calendar connect", () => {
     expect(store.integrations).not.toBeNull();
     const deniedWs = await post("disconnect", { workspace: true }, bearer("user-2", "member"));
     expect(deniedWs.status).toBe(403);
+  });
+});
+
+describe("Per-user Search Console", () => {
+  // A connected user with a still-valid access token (no refresh needed).
+  const connect = (userId) => store.userTokens.set(userId, {
+    access_token: "at-live", refresh_token: "rt-live",
+    token_expiry: new Date(Date.now() + 3600_000).toISOString(), account_email: "nik@agency.com",
+  });
+
+  it("gscSites lists the user's verified properties only", async () => {
+    connect("user-1");
+    const res = await post("gscSites", {}, bearer("user-1"));
+    expect(res.status).toBe(200);
+    const { sites } = await res.json();
+    expect(sites.map((s) => s.site_url)).toEqual(["https://acmemovers.com/", "sc-domain:zetadental.com"]);
+  });
+
+  it("gscSites without a connection asks the user to connect in Settings", async () => {
+    const res = await post("gscSites", {}, bearer("user-1"));
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toContain("Connect your Google account");
+  });
+
+  it("gscSiteAdd only accepts sites on the user's own account", async () => {
+    connect("user-1");
+    const bad = await post("gscSiteAdd", { site_url: "sc-domain:not-mine.com" }, bearer("user-1"));
+    expect(bad.status).toBe(400);
+    const ok = await post("gscSiteAdd", { site_url: "sc-domain:zetadental.com" }, bearer("user-1"));
+    expect(ok.status).toBe(200);
+    expect(store.userSites.get("user-1").has("sc-domain:zetadental.com")).toBe(true);
+  });
+
+  it("gscSiteData fetches once, then serves from the cache (subrequest budget)", async () => {
+    connect("user-1");
+    store.userSites.set("user-1", new Set(["sc-domain:zetadental.com"]));
+    const first = await (await post("gscSiteData", { site_url: "sc-domain:zetadental.com" }, bearer("user-1"))).json();
+    expect(first.daily.length).toBe(2);
+    expect(first.queries.length).toBe(2);
+    expect(gscCalls.analytics).toBe(2); // one daily + one queries call
+    const second = await (await post("gscSiteData", { site_url: "sc-domain:zetadental.com" }, bearer("user-1"))).json();
+    expect(second.daily.length).toBe(2);
+    expect(gscCalls.analytics).toBe(2); // served from gsc_cache — no new Google calls
+  });
+
+  it("gscSiteData refuses sites the user hasn't imported", async () => {
+    connect("user-1");
+    const res = await post("gscSiteData", { site_url: "sc-domain:zetadental.com" }, bearer("user-1"));
+    expect(res.status).toBe(404);
+  });
+
+  it("gscAttach maps a client to the user's site; gscClientData then serves it with source 'user'", async () => {
+    connect("user-1");
+    const attach = await post("gscAttach", { client_id: "client-9", site_url: "sc-domain:zetadental.com" }, bearer("user-1"));
+    expect(attach.status).toBe(200);
+    expect(store.clientSites.get("client-9")).toMatchObject({ site_url: "sc-domain:zetadental.com", user_id: "user-1" });
+    // Any teammate viewing the client gets the data via the ATTACHING user's token.
+    const data = await (await post("gscClientData", { client_id: "client-9" }, bearer("user-2"))).json();
+    expect(data.source).toBe("user");
+    expect(data.site_url).toBe("sc-domain:zetadental.com");
+    expect(data.daily.length).toBe(2);
+  });
+
+  it("gscClientData without an attachment falls back to the service-account tables", async () => {
+    store.gscDaily = [{ date: "2026-06-30", clicks: 3, impressions: 80, ctr: 0.04, position: 12 }];
+    const data = await (await post("gscClientData", { client_id: "client-9" }, bearer("user-1"))).json();
+    expect(data.source).toBe("service");
+    expect(data.daily.length).toBe(1);
+    expect(gscCalls.analytics).toBe(0); // no Google calls on the fallback path
+  });
+
+  it("gscDetach removes the mapping and the fallback takes over", async () => {
+    connect("user-1");
+    await post("gscAttach", { client_id: "client-9", site_url: "sc-domain:zetadental.com" }, bearer("user-1"));
+    await post("gscDetach", { client_id: "client-9" }, bearer("user-1"));
+    const data = await (await post("gscClientData", { client_id: "client-9" }, bearer("user-1"))).json();
+    expect(data.source).toBe("service");
   });
 });

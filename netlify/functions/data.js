@@ -863,6 +863,9 @@ export default async (req) => {
           for (const f of files) { try { await store.delete(f.blob_key); } catch { /* best effort */ } }
         }
         await sql`delete from clients where id=${payload.id}`;
+        // The Search Console attachment has no FK (the table is owned by
+        // google.js and may not exist until Google is first used).
+        try { await sql`delete from client_gsc_sites where client_id=${payload.id}`; } catch { /* table not created yet */ }
         if (named.length) await logActivity(sql, { actor, verb: "deleted client", entity: "client", entity_label: named[0].name, client_id: payload.id });
         return json({ ok: true });
       }
