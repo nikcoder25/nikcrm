@@ -65,6 +65,39 @@ export async function login(name, password, email) {
   return session;
 }
 
+// Complete a "Sign in with Google" redirect. The API sends the browser back
+// with the signed session token in the URL FRAGMENT (#sso_token=…) — fragments
+// never reach any server or access log. The payload half of the token is plain
+// base64url JSON ({sub, name, role, exp}); decode it for the display name/role
+// (the server still verifies the signature on every request), persist the
+// session, and scrub the fragment from the address bar. Returns the session,
+// or null when the URL carries no (valid) token. Memoized because it mutates
+// the URL: React StrictMode runs state initializers twice, and the second run
+// must see the same answer, not an already-scrubbed URL.
+let _ssoConsumed;
+export function consumeSsoRedirect() {
+  if (_ssoConsumed !== undefined) return _ssoConsumed;
+  _ssoConsumed = null;
+  const m = /[#&]sso_token=([^&]+)/.exec(window.location.hash || "");
+  if (!m) return null;
+  window.history.replaceState({}, "", window.location.pathname + window.location.search);
+  try {
+    const token = decodeURIComponent(m[1]);
+    const b64 = token.split(".")[0].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4)));
+    const session = {
+      name: String(payload.name || "Team member"),
+      role: payload.role === "admin" ? "admin" : "member",
+      token,
+    };
+    saveSession(session);
+    _ssoConsumed = session;
+    return session;
+  } catch {
+    return null;
+  }
+}
+
 export const load = () => call("load");
 // Admin-only full-database export (every business table; no secrets/file bytes).
 export const backupExport = () => call("backupExport");

@@ -236,6 +236,11 @@ create table if not exists users (
   active boolean default true,
   created_at timestamptz default now()
 );
+-- Google SSO identity ("Sign in with Google" matches an existing account by
+-- sub/email and records both here; the sub never changes, emails can).
+-- Applied at runtime by google.js's ensureSchema.
+alter table if exists users add column if not exists google_sub text default '';
+alter table if exists users add column if not exists google_email text default '';
 
 -- Activity log (audit trail): who did what, when. client_id has NO foreign
 -- key on purpose — activity must survive client deletion, so the readable
@@ -298,6 +303,28 @@ create table if not exists oauth_states (
   state text primary key,
   created_by text default '',
   created_at timestamptz default now()
+);
+-- Which flow a state belongs to ('connect' = legacy workspace connect,
+-- 'connect_user' = per-user Gmail/Calendar connect, 'sso' = Sign in with
+-- Google), who started it, and which frontend origin the OAuth callback sends
+-- the browser back to (validated against ALLOWED_ORIGIN / the API origin).
+alter table oauth_states add column if not exists flow text default 'connect';
+alter table oauth_states add column if not exists user_id text default '';
+alter table oauth_states add column if not exists app_origin text default '';
+
+-- Per-user Gmail/Calendar OAuth tokens (one row per connected user account).
+-- Server-side only, never sent to the browser; takes precedence over the
+-- workspace-wide `integrations` row. user_id is text (not a FK) on purpose:
+-- google.js creates this table and must not depend on creation order with
+-- `users`; rows are removed on disconnect and on user deletion.
+create table if not exists user_google_tokens (
+  user_id text primary key,
+  access_token text default '',
+  refresh_token text default '',
+  token_expiry timestamptz,
+  scope text default '',
+  account_email text default '',
+  updated_at timestamptz default now()
 );
 
 -- ============================================================

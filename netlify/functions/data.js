@@ -1487,6 +1487,9 @@ export default async (req) => {
         if (!isAdmin) return json({ error: "Only an admin can manage user accounts." }, 403);
         if (!payload.id) return json({ error: "Missing user id." }, 400);
         const gone = await sql`delete from users where id=${payload.id} returning name, email`;
+        // Their per-user Google tokens go with them. The table is owned by
+        // google.js and only appears once Google is first used, hence the guard.
+        try { await sql`delete from user_google_tokens where user_id=${String(payload.id)}`; } catch { /* table not created yet */ }
         if (gone.length) await logActivity(sql, { actor, verb: "deleted user account", entity: "user", entity_label: `${gone[0].name} (${gone[0].email})` });
         return json({ ok: true });
       }

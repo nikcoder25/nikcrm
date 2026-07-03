@@ -20,7 +20,13 @@ async function gcall(action, payload) {
 }
 
 export const googleStatus = () => gcall("status");
-export const googleAuthUrl = (by) => gcall("authUrl", { by });
-export const googleDisconnect = () => gcall("disconnect");
+// Connect Gmail/Calendar: the CURRENT USER's account by default; pass
+// workspace=true (admin only) for the legacy workspace-wide fallback. The app
+// origin rides along so the OAuth callback can bounce back to this site even
+// when the API lives on another origin (Cloudflare Worker + static frontend).
+export const googleAuthUrl = (by, workspace = false) => gcall("authUrl", { by, workspace, app_origin: window.location.origin });
+export const googleDisconnect = (workspace = false) => gcall("disconnect", { workspace });
 export const pushToCalendar = (activity_id) => gcall("calendarPush", { activity_id });
 export const syncGmail = (client_id) => gcall("gmailSync", { client_id });
+// Public (no session yet): start "Sign in with Google" from the login screen.
+export const googleSsoUrl = () => gcall("ssoStart", { app_origin: window.location.origin });

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Plug, Check, RefreshCw, Calendar, Mail, Loader, DatabaseBackup } from "lucide-react";
+import { Plug, Check, RefreshCw, Calendar, Mail, Loader, DatabaseBackup, Building2 } from "lucide-react";
 import { ink, accent, tint, disp, BD, BDt, btn } from "../lib/theme";
 import { googleStatus, googleAuthUrl, googleDisconnect } from "../lib/google";
 import { backupExport } from "../lib/api";
@@ -7,9 +7,10 @@ import { todayStr } from "../lib/format";
 import { useToast } from "../lib/toast";
 import { Panel, Center } from "./ui";
 
-// Workspace settings: the Google (Gmail + Calendar) connection and the
-// admin-only full-database backup download. Google tokens live server-side —
-// this screen only reflects connection state.
+// Workspace settings: the per-user Google (Gmail + Calendar) connection and
+// the admin-only full-database backup download. Google tokens live server-side
+// — this screen only reflects connection state for the CURRENT user, plus the
+// legacy workspace-wide fallback connection.
 export default function Settings({ isAdmin, name, onConnected }) {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -22,15 +23,15 @@ export default function Settings({ isAdmin, name, onConnected }) {
   };
   useEffect(() => { (async () => { setLoading(true); await refresh(); setLoading(false); })(); }, []);
 
-  const connect = async () => {
+  const connect = async (workspace = false) => {
     setBusy(true);
-    try { const { url } = await googleAuthUrl(name); window.location.assign(url); }
+    try { const { url } = await googleAuthUrl(name, workspace); window.location.assign(url); }
     catch (e) { toast(e?.message || "Could not start Google connect.", "error"); setBusy(false); }
   };
 
-  const disconnect = async () => {
+  const disconnect = async (workspace = false) => {
     setBusy(true);
-    try { await googleDisconnect(); await refresh(); toast("Google disconnected"); }
+    try { await googleDisconnect(workspace); await refresh(); toast(workspace ? "Workspace fallback disconnected" : "Google disconnected"); }
     catch (e) { toast(e?.message || "Could not disconnect.", "error"); }
     setBusy(false);
   };
@@ -60,7 +61,9 @@ export default function Settings({ isAdmin, name, onConnected }) {
   if (loading) return <Center>Loading settings…</Center>;
 
   const configured = status?.configured;
-  const connected = status?.connected;
+  const userAccount = Boolean(status?.user_account);   // session is a personal account (not shared password)
+  const userConnected = Boolean(status?.user_connected);
+  const wsConnected = Boolean(status?.workspace_connected);
 
   return (
     <div style={{ maxWidth: 680 }}>
@@ -68,14 +71,14 @@ export default function Settings({ isAdmin, name, onConnected }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 20px", borderBottom: BD }}>
           <Plug size={17} />
           <h2 style={{ fontFamily: disp, fontSize: 15, textTransform: "uppercase" }}>Google — Gmail &amp; Calendar</h2>
-          <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 800, padding: "3px 11px", borderRadius: 20, border: BDt, background: connected ? "#dff3e8" : tint, color: connected ? "#1f7a4d" : ink }}>
-            {connected ? "Connected" : configured ? "Not connected" : "Not configured"}
+          <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 800, padding: "3px 11px", borderRadius: 20, border: BDt, background: userConnected ? "#dff3e8" : tint, color: userConnected ? "#1f7a4d" : ink }}>
+            {userConnected ? "Connected" : configured ? "Not connected" : "Not configured"}
           </span>
         </div>
 
         <div style={{ padding: 20 }}>
           <p style={{ fontSize: 13.5, fontWeight: 600, color: "#4b4560", lineHeight: 1.5, marginBottom: 16 }}>
-            Connect one Google account for the whole workspace to sync client emails and follow-ups two ways:
+            Connect <b>your own</b> Google account — each teammate connects theirs. Gmail imports and Calendar pushes then run as you:
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12, marginBottom: 18 }}>
             <div style={{ border: BDt, borderRadius: 10, padding: "12px 14px", background: "#faf8f2" }}>
@@ -96,32 +99,53 @@ export default function Settings({ isAdmin, name, onConnected }) {
             </div>
           )}
 
-          {configured && connected && (
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", background: "#dff3e8", border: "2px solid #1f7a4d", borderRadius: 10, padding: "12px 14px" }}>
-              <Check size={18} style={{ color: "#1f7a4d" }} />
-              <div style={{ flex: 1, minWidth: 160 }}>
-                <div style={{ fontWeight: 800, fontSize: 13.5 }}>{status.account_email || "Google account"}</div>
-                <div style={{ fontSize: 12, color: "#4b4560", fontWeight: 600 }}>Gmail &amp; Calendar sync is available on client pages.</div>
-              </div>
-              <button style={{ ...btn("#fff", ink), fontSize: 12.5 }} disabled={busy} onClick={refresh}><RefreshCw size={14} /> Refresh</button>
-              {isAdmin && <button style={{ ...btn("#fff", "#c0392b"), fontSize: 12.5 }} disabled={busy} onClick={disconnect}>Disconnect</button>}
+          {configured && !userAccount && (
+            <div style={{ background: "#fdf3d8", border: "2px solid #b7791f", color: "#7a4f10", borderRadius: 10, padding: "12px 14px", fontSize: 12.5, fontWeight: 700, lineHeight: 1.5 }}>
+              You're signed in with the shared team password, which has no personal profile to attach a Google account to.
+              Sign in via <b>My account</b> or <b>Sign in with Google</b> to connect your own Gmail &amp; Calendar.
             </div>
           )}
 
-          {configured && !connected && (
-            isAdmin ? (
-              <button style={{ ...btn(accent, "#fff"), justifyContent: "center" }} disabled={busy} onClick={connect}>
-                {busy ? <Loader size={16} className="spin" /> : <Plug size={16} />} {busy ? "Redirecting…" : "Connect Google"}
-              </button>
-            ) : (
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#6b6580" }}>Ask an admin to connect the workspace Google account.</div>
-            )
+          {configured && userAccount && userConnected && (
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", background: "#dff3e8", border: "2px solid #1f7a4d", borderRadius: 10, padding: "12px 14px" }}>
+              <Check size={18} style={{ color: "#1f7a4d" }} />
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <div style={{ fontWeight: 800, fontSize: 13.5 }}>{status.user_email || "Your Google account"}</div>
+                <div style={{ fontSize: 12, color: "#4b4560", fontWeight: 600 }}>Gmail &amp; Calendar sync runs as you on client pages.</div>
+              </div>
+              <button style={{ ...btn("#fff", ink), fontSize: 12.5 }} disabled={busy} onClick={refresh}><RefreshCw size={14} /> Refresh</button>
+              <button style={{ ...btn("#fff", "#c0392b"), fontSize: 12.5 }} disabled={busy} onClick={() => disconnect(false)}>Disconnect</button>
+            </div>
+          )}
+
+          {configured && userAccount && !userConnected && (
+            <button style={{ ...btn(accent, "#fff"), justifyContent: "center" }} disabled={busy} onClick={() => connect(false)}>
+              {busy ? <Loader size={16} className="spin" /> : <Plug size={16} />} {busy ? "Redirecting…" : "Connect your Google account"}
+            </button>
+          )}
+
+          {/* Legacy workspace-wide fallback: used when someone hasn't connected
+              their own account. Admin-managed; per-user always wins. */}
+          {configured && (wsConnected || isAdmin) && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 14, border: BDt, borderRadius: 10, padding: "10px 14px", background: "#faf8f2" }}>
+              <Building2 size={15} style={{ color: "#6b6580" }} />
+              <div style={{ flex: 1, minWidth: 160, fontSize: 12.5, fontWeight: 700, color: "#4b4560" }}>
+                Workspace fallback: {wsConnected
+                  ? <>connected as <b>{status.workspace_email || "a Google account"}</b> — used for teammates who haven't connected their own.</>
+                  : "not connected. Optional shared account used when someone hasn't connected their own."}
+              </div>
+              {isAdmin && (wsConnected
+                ? <button style={{ ...btn("#fff", "#c0392b"), fontSize: 12, padding: "7px 11px" }} disabled={busy} onClick={() => disconnect(true)}>Disconnect</button>
+                : <button style={{ ...btn("#fff", ink), fontSize: 12, padding: "7px 11px" }} disabled={busy} onClick={() => connect(true)}>Connect fallback</button>)}
+            </div>
           )}
         </div>
       </Panel>
 
       <div style={{ marginTop: 14, fontSize: 12, color: "#6b6580", fontWeight: 600, lineHeight: 1.5 }}>
-        Access is limited to the scopes shown on Google's consent screen (read-only Gmail and Calendar events). Tokens are stored server-side and never sent to the browser. Disconnecting removes them.
+        Access is limited to the scopes shown on Google's consent screen (read-only Gmail and Calendar events).
+        Tokens are stored server-side, per user, and never sent to the browser. Disconnecting removes yours.
+        Signing in with Google (on the login screen) only ever asks for your email and profile — never your mailbox.
       </div>
 
       <div style={{ marginTop: 18 }}>
