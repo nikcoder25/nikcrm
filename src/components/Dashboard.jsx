@@ -421,7 +421,7 @@ export default function Dashboard({ session, onSignOut }) {
                 tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
                 tab === "websites" ? <Websites onOpen={(site) => navigate(websitePath(site))} /> :
                 tab === "ai" ? <AiVisibility clients={clients} citations={aiCitations} onCreate={createAiCitation} onUpdate={updateAiCitation} onDelete={delAiCitation} /> :
-                tab === "revenue" ? <Revenue clients={clients} payments={payments} month={revMonth} setMonth={setRevMonth} onSet={setPayment} /> :
+                tab === "revenue" ? <Revenue clients={clients} payments={payments} orders={orders} month={revMonth} setMonth={setRevMonth} onSet={setPayment} isAdmin={isAdmin} /> :
                 tab === "activity" ? <ActivityLog items={activity} clients={clients} /> :
                 tab === "settings" ? <Settings isAdmin={isAdmin} name={session.name} onConnected={setGoogleConnected} /> :
                 <Team members={members} clients={clients} tasks={tasks} onSave={saveMember} onDelete={delMember} isAdmin={isAdmin} />}
