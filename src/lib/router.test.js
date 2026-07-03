@@ -1,5 +1,30 @@
 import { describe, it, expect } from "vitest";
-import { clientIdFromPath, clientTabFromPath, clientPath, portalTokenFromPath, portalPath, websiteFromPath, websitePath } from "./router.js";
+import { clientIdFromPath, clientTabFromPath, clientPath, portalTokenFromPath, portalPath, websiteFromPath, websitePath, tabPath, tabFromPath } from "./router.js";
+
+describe("tab routing", () => {
+  it("keeps the overview tab at the root", () => {
+    expect(tabPath("overview")).toBe("/");
+    expect(tabFromPath("/")).toBe("overview");
+    expect(tabFromPath("")).toBe("overview");
+  });
+  it("round-trips every top-level tab through the URL", () => {
+    for (const tab of ["clients", "tasks", "deliverables", "orders", "backlinks", "keywords", "websites", "ai", "revenue", "activity", "team", "settings"]) {
+      expect(tabFromPath(tabPath(tab))).toBe(tab);
+    }
+  });
+  it("tolerates a trailing slash", () => {
+    expect(tabFromPath("/orders/")).toBe("orders");
+  });
+  it("maps detail routes back onto their tab", () => {
+    expect(tabFromPath("/clients/abc-123")).toBe("clients");
+    expect(tabFromPath("/clients/abc-123/seo")).toBe("clients");
+    expect(tabFromPath(websitePath("sc-domain:example.com"))).toBe("websites");
+  });
+  it("falls back to overview for unknown paths", () => {
+    expect(tabFromPath("/nope")).toBe("overview");
+    expect(tabPath("nope")).toBe("/");
+  });
+});
 
 describe("websiteFromPath", () => {
   it("round-trips Search Console site URLs (colons and slashes included)", () => {

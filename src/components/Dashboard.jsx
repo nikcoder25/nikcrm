@@ -3,7 +3,7 @@ import { FolderKanban, CheckSquare, Users, Plus, LogOut, DollarSign, ClipboardLi
 import * as api from "../lib/api";
 import { ink, accent, cream, sideBg, sideText, disp, BD, BDt, SHs, tint, btn, globalCss } from "../lib/theme";
 import { ym } from "../lib/format";
-import { useRouter, clientIdFromPath, clientPath, websiteFromPath, websitePath } from "../lib/router";
+import { useRouter, clientIdFromPath, clientPath, websiteFromPath, websitePath, tabPath, tabFromPath } from "../lib/router";
 import { useToast } from "../lib/toast";
 import { Center, Panel, Empty } from "./ui";
 import Overview from "./Overview";
@@ -43,7 +43,6 @@ export default function Dashboard({ session, onSignOut }) {
   const [activities, setActivities] = useState([]);      // client touchpoints (calls/emails/notes)
   const [members, setMembers] = useState([]);
   const [revMonth, setRevMonth] = useState(ym(new Date()));
-  const [tab, setTab] = useState("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -59,15 +58,19 @@ export default function Dashboard({ session, onSignOut }) {
   const { path, navigate } = useRouter();
   const detailId = clientIdFromPath(path);
   const siteId = websiteFromPath(path); // /websites/:site — one page per imported website
+  // The active nav tab is derived from the URL (see router.TAB_PATHS) so a
+  // refresh or a shared link reopens the same page instead of the overview.
+  const tab = tabFromPath(path);
 
   const isAdmin = session.role === "admin";
   const detailClient = detailId ? clients.find((c) => String(c.id) === String(detailId)) : null;
 
   const openClient = (c) => navigate(clientPath(c.id));
-  const backToClients = () => { setTab("clients"); navigate("/"); };
-  const backToWebsites = () => { setTab("websites"); navigate("/"); };
-  // Switch tabs, close the mobile drawer, and leave any open detail page.
-  const goTab = (k) => { setTab(k); setSidebarOpen(false); if (detailId || siteId) navigate("/"); };
+  const backToClients = () => navigate(tabPath("clients"));
+  const backToWebsites = () => navigate(tabPath("websites"));
+  // Switch tabs, close the mobile drawer, and leave any open detail page —
+  // navigating to the tab's own URL handles all three at once.
+  const goTab = (k) => { setSidebarOpen(false); navigate(tabPath(k)); };
 
   // A 401 means our stored session is no longer valid (e.g. the password was
   // rotated). Drop the stale session and bounce to the login screen instead of
