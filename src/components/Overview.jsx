@@ -54,8 +54,8 @@ export default function Overview({ clients, tasks, deliverables, payments, keywo
   const dueTasks = tasks.filter(overdueTask);
   const blocked = deliverables.filter((d) => d.status === "blocked");
   // A payment needs attention when it's explicitly overdue, or still pending for
-  // a month that has already passed.
-  const duePayments = payments.filter((p) => p.status === "overdue" || (p.status === "pending" && p.month < month));
+  // a month that has already passed. A $0 amount is nothing owed, so never flag it.
+  const duePayments = payments.filter((p) => Number(p.amount) > 0 && (p.status === "overdue" || (p.status === "pending" && p.month < month)));
   // Renewals landing this month or next, for still-active clients.
   const renewals = activeClients.filter((c) => c.renewal_month && (c.renewal_month === month || c.renewal_month === nextMonth));
   // Scope creep: any client over their retainer scope this month.

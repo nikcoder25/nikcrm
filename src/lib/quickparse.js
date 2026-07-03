@@ -37,7 +37,9 @@ const TYPE_SYNONYMS = [
 
 const STATUS_ALIAS = {
   todo: "todo", "to-do": "todo", backlog: "todo",
-  doing: "doing", inprogress: "doing", "in-progress": "doing", progress: "doing", wip: "doing", started: "doing",
+  doing: "doing", inprogress: "doing", "in-progress": "doing", "in progress": "doing", progress: "doing", wip: "doing", started: "doing",
+  review: "review", "in-review": "review", "in review": "review", reviewing: "review",
+  blocked: "blocked", block: "blocked",
   done: "done", complete: "done", completed: "done", finished: "done",
 };
 
@@ -170,10 +172,15 @@ export function parseQuickTask(input, { clients = [], members = [] } = {}, now =
   let text = String(input || "");
   const matched = { type: false, client: false, assignee: false, status: false, due: false };
 
-  // status  !doing
-  text = text.replace(/(^|\s)!([a-z-]+)/gi, (full, sp, word) => {
-    const s = STATUS_ALIAS[word.toLowerCase()];
-    if (s) { matched.status = s; return sp; }
+  // status  !doing / !in progress / !in review  (a bang plus one or two words)
+  text = text.replace(/(^|\s)!([a-z][a-z-]*)(\s+[a-z][a-z-]*)?/gi, (full, sp, w1, w2) => {
+    const first = w1.toLowerCase();
+    const two = w2 ? `${first} ${w2.trim().toLowerCase()}` : "";
+    // Prefer the two-word status ("in progress") over the single word ("in").
+    if (two && STATUS_ALIAS[two]) { matched.status = STATUS_ALIAS[two]; return sp; }
+    // Otherwise only the first word was the status; leave the trailing word
+    // (e.g. "!done today" → status done, "today" stays for the date parser).
+    if (STATUS_ALIAS[first]) { matched.status = STATUS_ALIAS[first]; return sp + (w2 || ""); }
     return full;
   });
 
