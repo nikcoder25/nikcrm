@@ -1,20 +1,21 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { Plus, Pencil, Trash2, Download, Search, ExternalLink, Upload, FileText, Sheet } from "lucide-react";
+import { Plus, Pencil, Trash2, Download, Search, ExternalLink, Upload, FileText, Sheet, RotateCcw, Archive } from "lucide-react";
 import { ink, accent, tint, BDt, btn, iconBtn, sel, lbl, input } from "../lib/theme";
-import { ORDER_STATES, SOURCES } from "../lib/constants";
+import { ORDER_STATES, SOURCES, orderStatusLabel } from "../lib/constants";
 import { dateLabel, money } from "../lib/format";
 import { downloadCsv, ordersCsv } from "../lib/csv";
 import { parseImport, rowsToOrders } from "../lib/importParse";
+import { splitOrders, RESTORE_STATUS } from "../lib/orders";
 import { useToast } from "../lib/toast";
 import { Panel, Empty, Field, Pick, Row, Modal } from "./ui";
 
 const GRAY = "#6b6580";
 const MUTED = "#a39db5";
 const DAY_MS = 86400000;
-const STATUS_BG = { not_started: "#f0ece2", in_progress: "#d7f5df", finished: "#dbe7fb", delivered: "#d2ecec" };
+const STATUS_BG = { not_started: "#f0ece2", in_progress: "#d7f5df", finished: "#dbe7fb", delivered: "#d2ecec", reviewed: "#e7e1f7" };
 
-// Finished/delivered orders are done — their countdown just reads "Delivered".
-const isDone = (o) => o.status === "delivered" || o.status === "finished";
+// Finished/delivered/reviewed orders are done — their countdown just reads "Delivered".
+const isDone = (o) => o.status === "delivered" || o.status === "finished" || o.status === "reviewed";
 
 // The delivery deadline as a local-time timestamp: end_date at the delivery
 // time when one is set, otherwise end-of-day (so an order due "today" with no
@@ -67,9 +68,11 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [tab, setTab] = useState("active"); // "active" | "archived"
   const [filterStatus, setFilterStatus] = useState("");
   const [filterSource, setFilterSource] = useState("");
   const [search, setSearch] = useState("");
+  const toast = useToast();
   // Ticks once a second so every open order's countdown reverse-clocks live.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -85,14 +88,26 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
   const openEdit = (o) => { setEditing(o); setShowForm(true); };
   const close = () => { setShowForm(false); setEditing(null); };
 
+  // Reaching "Reviewed" archives the order; restoring drops it back to an active
+  // stage so it returns to Active and doesn't immediately re-archive.
+  const changeStatus = (o) => { onStatus(o); if (o.status === "reviewed") toast(`Archived "${o.name}"`); };
+  const restore = (o) => { onStatus({ ...o, status: RESTORE_STATUS }); toast(`Restored "${o.name}" to Active`); };
+
+  // Archiving is derived from status, so the two tabs are just a partition of the
+  // same list — every field is preserved on the row.
+  const { active: activeOrders, archived: archivedOrders } = useMemo(() => splitOrders(orders), [orders]);
+  const tabOrders = tab === "archived" ? archivedOrders : activeOrders;
+
   const q = search.trim().toLowerCase();
-  const items = useMemo(() => orders.filter((o) =>
+  // Filters, search and the counter all operate within the current tab.
+  const items = useMemo(() => tabOrders.filter((o) =>
     (!filterStatus || o.status === filterStatus)
     && (!filterSource || (o.source || "Direct") === filterSource)
     && (!q || [o.name, o.person, o.website, o.order_data, o.source].some((v) => String(v || "").toLowerCase().includes(q)))
-  ), [orders, filterStatus, filterSource, q]);
+  ), [tabOrders, filterStatus, filterSource, q]);
 
-  const open = orders.filter((o) => !isDone(o)).length;
+  const open = tabOrders.filter((o) => !isDone(o)).length;
+  const archivedView = tab === "archived";
 
   const cell = { fontSize: 12.5, fontWeight: 700, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" };
   // Source sits after Status; Price is an admin-only track; Files (doc/sheet
@@ -104,6 +119,18 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
 
   return (
     <div>
+      {/* Active / Archived tab toggle. Archived holds orders that reached "Reviewed". */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        {[["active", "Active", activeOrders.length], ["archived", "Archived", archivedOrders.length]].map(([key, label, n]) => {
+          const on = tab === key;
+          return (
+            <button key={key} onClick={() => setTab(key)} aria-pressed={on}
+              style={{ ...btn(on ? ink : "#fff", on ? "#fff" : ink), padding: "7px 14px", fontSize: 12.5 }}>
+              {key === "archived" ? <Archive size={14} /> : null}{label} <span style={{ opacity: 0.65, fontWeight: 700 }}>{n}</span>
+            </button>
+          );
+        })}
+      </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 18 }}>
         <select style={{ ...sel, flex: "none", minWidth: 140 }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
           <option value="">All statuses</option>
@@ -119,7 +146,7 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
         </div>
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 11.5, fontWeight: 800, background: tint, border: BDt, borderRadius: 7, padding: "4px 11px" }}>
-          {open} open / {orders.length} total
+          {archivedView ? `${tabOrders.length} archived` : `${open} open / ${tabOrders.length} total`}
         </span>
         <button style={btn("#fff", ink)} disabled={orders.length === 0} onClick={() => downloadCsv("orders.csv", ordersCsv(orders, isAdmin))}>
           <Download size={15} /> Export CSV
@@ -133,8 +160,10 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
       </div>
 
       <Panel>
-        {orders.length === 0 ? (
-          <Empty>No orders yet. Tap "Add order" to track a delivery with its deadline countdown.</Empty>
+        {tabOrders.length === 0 ? (
+          <Empty>{archivedView
+            ? "No archived orders yet. Set an order's status to \"Reviewed\" to archive it here."
+            : "No orders yet. Tap \"Add order\" to track a delivery with its deadline countdown."}</Empty>
         ) : items.length === 0 ? (
           <Empty>No orders match these filters.</Empty>
         ) : (
@@ -158,13 +187,20 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
               {items.map((o) => (
                 <div key={o.id} style={{ display: "grid", gridTemplateColumns: GRID, gap: 10, alignItems: "center", padding: "11px 20px", borderBottom: "1px solid #f0ece2" }}>
                   <span style={{ ...cell, fontWeight: 800 }} title={o.name}>{o.name}</span>
-                  <select
-                    value={o.status || "not_started"}
-                    onChange={(e) => onStatus({ ...o, status: e.target.value })}
-                    style={{ ...sel, flex: "none", minWidth: 0, padding: "7px 8px", fontSize: 12, fontWeight: 800, background: STATUS_BG[o.status] || "#fff" }}
-                  >
-                    {ORDER_STATES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-                  </select>
+                  {archivedView ? (
+                    <span title="Archived (Reviewed)"
+                      style={{ ...cell, fontWeight: 800, background: STATUS_BG[o.status] || "#fff", border: BDt, borderRadius: 7, padding: "6px 9px", justifySelf: "start" }}>
+                      {orderStatusLabel(o.status)}
+                    </span>
+                  ) : (
+                    <select
+                      value={o.status || "not_started"}
+                      onChange={(e) => changeStatus({ ...o, status: e.target.value })}
+                      style={{ ...sel, flex: "none", minWidth: 0, padding: "7px 8px", fontSize: 12, fontWeight: 800, background: STATUS_BG[o.status] || "#fff" }}
+                    >
+                      {ORDER_STATES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                    </select>
+                  )}
                   <span style={{ ...cell, color: o.source ? ink : MUTED }}>{o.source || "Direct"}</span>
                   <span style={{ ...cell, color: o.start_date ? GRAY : MUTED }}>{o.start_date ? dateLabel(o.start_date) : "—"}</span>
                   <span style={{ ...cell, color: o.end_date ? ink : MUTED }}>{o.end_date ? dateLabel(o.end_date) : "—"}</span>
@@ -185,7 +221,11 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
                     {!o.doc_file && !o.google_sheet ? <span style={{ color: MUTED }}>—</span> : null}
                   </span>
                   <span style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
-                    <button style={{ ...iconBtn, padding: 5 }} title="Edit" onClick={() => openEdit(o)}><Pencil size={13} /></button>
+                    {archivedView ? (
+                      <button style={{ ...iconBtn, padding: 5 }} title="Restore to Active" aria-label={`Restore ${o.name}`} onClick={() => restore(o)}><RotateCcw size={13} /></button>
+                    ) : (
+                      <button style={{ ...iconBtn, padding: 5 }} title="Edit" onClick={() => openEdit(o)}><Pencil size={13} /></button>
+                    )}
                     <button style={{ ...iconBtn, padding: 5 }} title="Delete" onClick={() => onDelete(o.id)}><Trash2 size={13} /></button>
                   </span>
                 </div>
@@ -200,7 +240,7 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
           initial={editing}
           isAdmin={isAdmin}
           onClose={close}
-          onSave={(o) => { (o.id ? onUpdate(o) : onCreate(o)); close(); }}
+          onSave={(o) => { (o.id ? onUpdate(o) : onCreate(o)); if (o.status === "reviewed") toast(`Archived "${o.name}"`); close(); }}
         />
       )}
 
