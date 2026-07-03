@@ -23,6 +23,40 @@ export function useRouter() {
   return { path, navigate };
 }
 
+// Top-level navigation lives in the URL so a refresh (or a shared/bookmarked
+// link) lands on the same page instead of snapping back to the overview. Each
+// tab owns one path segment; the default "overview" tab stays at the root so
+// "/" remains the single canonical URL for it. Detail routes (/clients/:id,
+// /websites/:site) sit under their tab's segment, so tabFromPath maps them
+// back onto the right nav item.
+export const TAB_PATHS = {
+  overview: "/",
+  clients: "/clients",
+  tasks: "/tasks",
+  deliverables: "/deliverables",
+  orders: "/orders",
+  backlinks: "/backlinks",
+  keywords: "/keywords",
+  websites: "/websites",
+  ai: "/ai",
+  revenue: "/revenue",
+  activity: "/activity",
+  team: "/team",
+  settings: "/settings",
+};
+
+export const tabPath = (tab) => TAB_PATHS[tab] || "/";
+
+// First path segment -> tab key. Empty or unknown paths fall back to the
+// overview tab. Detail routes share their tab's segment (e.g. /clients/:id ->
+// "clients"), so the correct nav item is still selected on those pages.
+export function tabFromPath(path) {
+  const seg = (path || "/").split("/").filter(Boolean)[0];
+  if (!seg) return "overview";
+  const hit = Object.entries(TAB_PATHS).find(([, p]) => p === `/${seg}`);
+  return hit ? hit[0] : "overview";
+}
+
 // /clients/:id or /clients/:id/:tab -> ":id" (string); any other path -> null.
 export function clientIdFromPath(path) {
   const m = /^\/clients\/([^/]+)(?:\/([^/]+))?\/?$/.exec(path || "");
