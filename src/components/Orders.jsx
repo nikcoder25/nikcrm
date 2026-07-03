@@ -73,9 +73,13 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
   // Ticks once a second so every open order's countdown reverse-clocks live.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
+    // Pause the per-second re-render while the add/edit modal is open so the
+    // form isn't torn through a re-render on every tick (countdowns behind the
+    // overlay aren't visible anyway, and resume the instant it closes).
+    if (showForm) return undefined;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [showForm]);
 
   const openAdd = () => { setEditing(null); setShowForm(true); };
   const openEdit = (o) => { setEditing(o); setShowForm(true); };

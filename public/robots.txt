@@ -1,0 +1,4 @@
+# Growth Atlas is a private, internal SEO operations tool with real client
+# data. It must never be crawled or indexed by anyone. Block every crawler.
+User-agent: *
+Disallow: /

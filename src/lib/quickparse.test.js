@@ -105,6 +105,22 @@ describe("parseQuickTask", () => {
     expect(r2.title).toBe("Add !important banner");
   });
 
+  it("parses multi-word statuses !in progress and !in review", () => {
+    const r = parseQuickTask("Rewrite meta titles !in progress", ctx, NOW);
+    expect(r.status).toBe("doing");
+    expect(r.title).toBe("Rewrite meta titles");
+    const r2 = parseQuickTask("Draft outreach email !in review", ctx, NOW);
+    expect(r2.status).toBe("review");
+    expect(r2.title).toBe("Draft outreach email");
+  });
+
+  it("keeps the trailing word when only the first is a status", () => {
+    const r = parseQuickTask("Publish post !done today", ctx, NOW);
+    expect(r.status).toBe("done");
+    expect(r.due).toBe("2026-07-01");
+    expect(r.title).toBe("Publish post");
+  });
+
   it("empty input yields an empty title", () => {
     expect(parseQuickTask("", ctx, NOW).title).toBe("");
   });

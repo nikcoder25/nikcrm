@@ -94,20 +94,27 @@ export function HealthBadge({ health, size = "md" }) {
 export function Modal({ title, onClose, children, maxWidth = 480 }) {
   const titleId = useId();
   const ref = useRef(null);
+  // Keep the latest onClose in a ref so the Escape handler always calls the
+  // current one without the mount effect depending on onClose's identity.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
-    // Move focus into the dialog on open (first field if there is one), and
-    // restore it to whatever was focused before when the dialog closes.
+    // Move focus into the dialog ONCE on open (first field if there is one), and
+    // restore it to whatever was focused before when the dialog closes. This must
+    // run only on mount: if a parent re-renders on a timer (e.g. the Orders
+    // per-second countdown), a re-running effect would keep yanking focus back to
+    // the first field, making every other field untypeable.
     const prev = document.activeElement;
     const el = ref.current;
     const field = el && el.querySelector("input, select, textarea");
     (field || el)?.focus();
-    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); closeRef.current(); } };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
       if (prev && typeof prev.focus === "function") prev.focus();
     };
-  }, [onClose]);
+  }, []);
   return (
     <div style={overlay} onClick={onClose}>
       <div ref={ref} tabIndex={-1} style={{ ...modal, maxWidth, outline: "none" }} onClick={(e) => e.stopPropagation()}
