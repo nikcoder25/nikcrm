@@ -5,7 +5,7 @@ import { gscSites, gscSiteList, gscSiteAdd, gscSiteRemove, gscSiteData, googleSt
 import { dateLabel } from "../lib/format";
 import { useToast } from "../lib/toast";
 import { Panel, Empty, Center, Modal } from "./ui";
-import { GSC_GRAY, GSC_RED, gscDay, gscWindows, pctChange, GscStat, GscClicksChart, GscQueriesTable } from "./GscBits";
+import { GSC_GRAY, GSC_RED, GSC_METRIC_META, gscDay, gscWindows, pctChange, GscStat, GscTrendChart, GscQueriesTable } from "./GscBits";
 
 /* ---------------- Websites (per-user Search Console) ----------------
    The tab shows a light LIST of the websites the current user imported; each
@@ -16,6 +16,31 @@ import { GSC_GRAY, GSC_RED, gscDay, gscWindows, pctChange, GscStat, GscClicksCha
    cached per site server-side. */
 
 const pct1 = (v) => `${(v * 100).toFixed(1)}%`;
+
+// The metric views for the daily chart on a website's page.
+const METRIC_TABS = [
+  { key: "clicks", label: "Clicks", metrics: ["clicks"], title: "Daily clicks" },
+  { key: "impressions", label: "Impressions", metrics: ["impressions"], title: "Daily impressions" },
+  { key: "both", label: "Clicks + Impressions", metrics: ["clicks", "impressions"], title: "Daily clicks & impressions" },
+];
+
+// Segmented control to pick which metric(s) the daily chart plots.
+function MetricToggle({ value, onChange }) {
+  return (
+    <div role="tablist" aria-label="Chart metric" style={{ display: "inline-flex", border: BDt, borderRadius: 9, overflow: "hidden", background: "#fff" }}>
+      {METRIC_TABS.map((t, i) => {
+        const on = value === t.key;
+        return (
+          <button key={t.key} role="tab" aria-selected={on} onClick={() => onChange(t.key)}
+            style={{ padding: "6px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", border: "none",
+              borderLeft: i ? "1px solid #e8e4d8" : "none", background: on ? accent : "transparent", color: on ? "#fff" : GSC_GRAY }}>
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 /* ---------- import modal: the user's sites as click-to-add rows ---------- */
 function ImportModal({ imported, onAdded, onClose }) {
@@ -82,7 +107,9 @@ function ImportModal({ imported, onAdded, onClose }) {
 export function WebsiteDetail({ site, onBack, onRemoved }) {
   // null = loading; { error } = failed; else { daily, queries }.
   const [data, setData] = useState(null);
+  const [metric, setMetric] = useState("clicks"); // which series the daily chart plots
   const toast = useToast();
+  const tab = METRIC_TABS.find((t) => t.key === metric) || METRIC_TABS[0];
 
   const load = (force = false) => {
     setData(null);
@@ -119,8 +146,18 @@ export function WebsiteDetail({ site, onBack, onRemoved }) {
           </div>
           {daily.length >= 2 && (
             <div style={{ border: BDt, borderRadius: 12, background: "#faf8f2", padding: 14, marginBottom: 14 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 800, marginBottom: 8 }}>Daily clicks — last {daily.length} days</div>
-              <div className="scroll-x"><GscClicksChart daily={daily} width={860} height={190} /></div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 800 }}>{tab.title} — last {daily.length} days</span>
+                  {tab.metrics.map((m) => (
+                    <span key={m} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 800, color: GSC_GRAY }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: GSC_METRIC_META[m].color }} /> {GSC_METRIC_META[m].label}
+                    </span>
+                  ))}
+                </div>
+                <MetricToggle value={metric} onChange={setMetric} />
+              </div>
+              <div className="scroll-x"><GscTrendChart daily={daily} metrics={tab.metrics} width={860} height={190} /></div>
             </div>
           )}
           <GscQueriesTable queries={data.queries || []} title="Top queries — last 28 days" />
