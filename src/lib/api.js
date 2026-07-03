@@ -174,6 +174,8 @@ export const deleteBacklink = (id) => call("backlinkDelete", { id });
 export const createOrder = (o) => call("orderCreate", o);
 export const updateOrder = (o) => call("orderUpdate", o);
 export const deleteOrder = (id) => call("orderDelete", { id });
+// Bulk import from a spreadsheet/CSV: { orders: [...] } → { ok, created }.
+export const bulkImportOrders = (orders) => call("ordersBulkImport", { orders });
 
 /* ---------------- AI visibility (AEO citation tracking) ---------------- */
 export const createAiCitation = (c) => call("aiCitationCreate", c);

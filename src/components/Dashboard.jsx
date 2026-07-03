@@ -229,6 +229,9 @@ export default function Dashboard({ session, onSignOut }) {
   const generateDeliverables = () => run(() => api.generateMonthDeliverables({ all: true, month: ym(new Date()) }), ["deliverables"]);
 
   const createOrder = (o) => run(() => api.createOrder({ ...o, created_by: session.name }), ["orders"]);
+  // Returns { ok, created } on success (undefined on failure) so the import
+  // modal can report how many rows landed.
+  const importOrders = (orders) => run(() => api.bulkImportOrders(orders), ["orders"]);
   const updateOrder = (o) => run(() => api.updateOrder(o), ["orders"]);
   const statusOrder = (o) => {
     setOrders((os) => os.map((x) => (x.id === o.id ? { ...x, ...o } : x)));
@@ -413,7 +416,7 @@ export default function Dashboard({ session, onSignOut }) {
                 tab === "clients" ? <Clients clients={clients} deliverables={deliverables} payments={payments} tasks={tasks} keywords={keywords} activities={activities} isAdmin={isAdmin} onOpen={openClient} onEdit={(c) => { setEditing(c); setShowForm(true); }} onDelete={delClient} onAdd={openAddClient} /> :
                 tab === "tasks" ? <Board clients={clients} tasks={tasks} members={members} onAdd={saveTask} onMove={moveTask} onAssign={assignTask} onDelete={delTask} /> :
                 tab === "deliverables" ? <Deliverables clients={clients} deliverables={deliverables} onSave={saveDeliverable} onStatus={statusDeliverable} onDelete={delDeliverable} onGenerate={generateDeliverables} /> :
-                tab === "orders" ? <Orders orders={orders} onCreate={createOrder} onUpdate={updateOrder} onStatus={statusOrder} onDelete={delOrder} isAdmin={isAdmin} /> :
+                tab === "orders" ? <Orders orders={orders} onCreate={createOrder} onImport={importOrders} onUpdate={updateOrder} onStatus={statusOrder} onDelete={delOrder} isAdmin={isAdmin} /> :
                 tab === "backlinks" ? <Backlinks clients={clients} backlinks={backlinks} onCreate={createBacklink} onUpdate={updateBacklink} onDelete={delBacklink} /> :
                 tab === "keywords" ? <Keywords clients={clients} keywords={keywords} history={keywordHistory} onCreate={createKeyword} onUpdate={updateKeyword} onDelete={delKeyword} onBulkAdd={bulkAddKeywords} onBulkDelete={bulkDeleteKeywords} onStar={starKeyword} /> :
                 tab === "websites" ? <Websites onOpen={(site) => navigate(websitePath(site))} /> :

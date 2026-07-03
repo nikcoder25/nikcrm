@@ -1,9 +1,11 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { Plus, Pencil, Trash2, Download, Search, ExternalLink } from "lucide-react";
+import { Plus, Pencil, Trash2, Download, Search, ExternalLink, Upload, FileText, Sheet } from "lucide-react";
 import { ink, accent, tint, BDt, btn, iconBtn, sel, lbl, input } from "../lib/theme";
 import { ORDER_STATES } from "../lib/constants";
 import { dateLabel, money } from "../lib/format";
 import { downloadCsv, ordersCsv } from "../lib/csv";
+import { parseImport, rowsToOrders } from "../lib/importParse";
+import { useToast } from "../lib/toast";
 import { Panel, Empty, Field, Pick, Row, Modal } from "./ui";
 
 const GRAY = "#6b6580";
@@ -61,8 +63,9 @@ function Countdown({ order, now, style }) {
 }
 
 /* ---------------- Orders ---------------- */
-export default function Orders({ orders, onCreate, onUpdate, onStatus, onDelete, isAdmin = false }) {
+export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus, onDelete, isAdmin = false }) {
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState(null);
   const [filterStatus, setFilterStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -86,10 +89,11 @@ export default function Orders({ orders, onCreate, onUpdate, onStatus, onDelete,
   const open = orders.filter((o) => !isDone(o)).length;
 
   const cell = { fontSize: 12.5, fontWeight: 700, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" };
-  // Price is an admin-only column, so the grid gains a track only for admins.
-  const GRID = `minmax(130px,1.4fr) 126px 88px 88px 62px minmax(104px,1fr) minmax(90px,0.9fr) minmax(140px,1.4fr) minmax(150px,1.5fr)${isAdmin ? " 96px" : ""} 74px`;
-  const minWidth = isAdmin ? 1180 : 1080;
+  // Price is an admin-only column; the Files column (doc/sheet links) is always shown.
+  const GRID = `minmax(130px,1.4fr) 126px 88px 88px 62px minmax(104px,1fr) minmax(90px,0.9fr) minmax(140px,1.4fr) minmax(150px,1.5fr)${isAdmin ? " 96px" : ""} 64px 74px`;
+  const minWidth = isAdmin ? 1246 : 1150;
   const th = { fontSize: 10.5, fontWeight: 800, color: GRAY, textTransform: "uppercase", letterSpacing: "0.04em" };
+  const fileLink = { color: ink, display: "inline-flex" };
 
   return (
     <div>
@@ -108,6 +112,9 @@ export default function Orders({ orders, onCreate, onUpdate, onStatus, onDelete,
         </span>
         <button style={btn("#fff", ink)} disabled={orders.length === 0} onClick={() => downloadCsv("orders.csv", ordersCsv(orders, isAdmin))}>
           <Download size={15} /> Export CSV
+        </button>
+        <button style={btn("#fff", ink)} onClick={() => setShowImport(true)}>
+          <Upload size={15} /> Import
         </button>
         <button style={btn(accent, "#fff")} onClick={openAdd}>
           <Plus size={16} /> Add order
@@ -133,6 +140,7 @@ export default function Orders({ orders, onCreate, onUpdate, onStatus, onDelete,
                 <span style={th}>Website</span>
                 <span style={th}>Order Data</span>
                 {isAdmin && <span style={{ ...th, textAlign: "right" }}>Price</span>}
+                <span style={th}>Files</span>
                 <span />
               </div>
               {items.map((o) => (
@@ -158,6 +166,11 @@ export default function Orders({ orders, onCreate, onUpdate, onStatus, onDelete,
                   ) : <span style={{ ...cell, color: MUTED }}>—</span>}
                   <span style={{ ...cell, color: o.order_data ? GRAY : MUTED }} title={o.order_data}>{o.order_data || "—"}</span>
                   {isAdmin && <span style={{ ...cell, fontWeight: 900, textAlign: "right", color: Number(o.price) > 0 ? ink : MUTED }}>{Number(o.price) > 0 ? money(o.price) : "—"}</span>}
+                  <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {o.doc_file ? <a href={o.doc_file} target="_blank" rel="noopener noreferrer" title="Doc file" style={fileLink}><FileText size={15} /></a> : null}
+                    {o.google_sheet ? <a href={o.google_sheet} target="_blank" rel="noopener noreferrer" title="Google sheet" style={fileLink}><Sheet size={15} /></a> : null}
+                    {!o.doc_file && !o.google_sheet ? <span style={{ color: MUTED }}>—</span> : null}
+                  </span>
                   <span style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
                     <button style={{ ...iconBtn, padding: 5 }} title="Edit" onClick={() => openEdit(o)}><Pencil size={13} /></button>
                     <button style={{ ...iconBtn, padding: 5 }} title="Delete" onClick={() => onDelete(o.id)}><Trash2 size={13} /></button>
@@ -177,6 +190,8 @@ export default function Orders({ orders, onCreate, onUpdate, onStatus, onDelete,
           onSave={(o) => { (o.id ? onUpdate(o) : onCreate(o)); close(); }}
         />
       )}
+
+      {showImport && <ImportOrders onClose={() => setShowImport(false)} onImport={onImport} />}
     </div>
   );
 }
@@ -185,7 +200,7 @@ export default function Orders({ orders, onCreate, onUpdate, onStatus, onDelete,
 function OrderForm({ initial, isAdmin = false, onClose, onSave }) {
   const [f, setF] = useState(initial || {
     name: "", status: "not_started", start_date: "", end_date: "",
-    delivery_time: "", person: "", website: "", order_data: "", price: "",
+    delivery_time: "", person: "", website: "", order_data: "", price: "", doc_file: "", google_sheet: "",
   });
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
   const submit = () => {
@@ -217,10 +232,143 @@ function OrderForm({ initial, isAdmin = false, onClose, onSave }) {
         <Field label="Project price (admin only)" value={f.price ?? ""} onChange={(v) => set("price", v)} type="number" placeholder="0" />
       )}
       <Field label="Website link" value={f.website || ""} onChange={(v) => set("website", v)} placeholder="https://client-site.com (optional)" />
+      <Row>
+        <Field label="Doc file link" value={f.doc_file || ""} onChange={(v) => set("doc_file", v)} placeholder="https://docs.google.com/… (optional)" />
+        <Field label="Google sheet link" value={f.google_sheet || ""} onChange={(v) => set("google_sheet", v)} placeholder="https://docs.google.com/… (optional)" />
+      </Row>
       <label style={lbl}>Order data</label>
       <textarea style={{ ...input, minHeight: 60, resize: "vertical" }} value={f.order_data || ""} onChange={(e) => set("order_data", e.target.value)} placeholder="e.g. 37 pages on page seo" />
       <button style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 20, justifyContent: "center" }} onClick={submit}>
         {initial ? "Save changes" : "Add order"}
+      </button>
+    </Modal>
+  );
+}
+
+/* ---------------- Bulk import (spreadsheet / CSV) ---------------- */
+const FIELD_OPTS = [
+  ["", "— Ignore —"], ["name", "Name"], ["status", "Status"], ["start_date", "Start date"],
+  ["end_date", "End / delivered"], ["delivery_time", "Time"], ["person", "Person"],
+  ["website", "Website"], ["order_data", "Order data"], ["doc_file", "Doc file"], ["google_sheet", "Google sheet"],
+];
+const FIELD_LABEL = Object.fromEntries(FIELD_OPTS);
+
+function ImportOrders({ onClose, onImport }) {
+  const [raw, setRaw] = useState("");
+  const [headerPref, setHeaderPref] = useState(undefined); // undefined = auto-detect
+  const [mapping, setMapping] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  const parsed = useMemo(
+    () => parseImport(raw, headerPref === undefined ? {} : { hasHeader: headerPref }),
+    [raw, headerPref],
+  );
+  // Reset the column mapping whenever the detected structure changes.
+  const sig = parsed.headers.join("¦") + "|" + parsed.hasHeader;
+  useEffect(() => { setMapping(parsed.mapping); }, [sig]);
+
+  const result = useMemo(() => rowsToOrders(parsed.dataRows, mapping), [parsed.dataRows, mapping]);
+  const orders = result.orders;
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+      toast("For Excel files, open the sheet, copy the rows, and paste them here — or save as CSV.", "error");
+      return;
+    }
+    try { setRaw(await file.text()); }
+    catch { toast("Could not read that file.", "error"); }
+  };
+
+  const doImport = async () => {
+    if (busy || !orders.length) return;
+    setBusy(true);
+    const res = await onImport(orders);
+    setBusy(false);
+    if (res) { toast(`Imported ${res.created || orders.length} order${(res.created || orders.length) === 1 ? "" : "s"}`); onClose(); }
+    // On failure the Dashboard's run() already surfaced the error; keep the modal open.
+  };
+
+  const setCol = (i, field) => setMapping((m) => m.map((v, j) => (j === i ? field : v)));
+  const previewCols = ["name", "status", "start_date", "end_date", "person", "website", "order_data", "doc_file", "google_sheet"];
+  const th = { fontSize: 10, fontWeight: 800, color: GRAY, textTransform: "uppercase", textAlign: "left", padding: "6px 8px", whiteSpace: "nowrap" };
+  const td = { fontSize: 11.5, fontWeight: 600, padding: "6px 8px", whiteSpace: "nowrap", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis" };
+
+  return (
+    <Modal title="Import orders" onClose={onClose} maxWidth={780}>
+      <p style={{ fontSize: 13, color: GRAY, fontWeight: 600, marginBottom: 12 }}>
+        Paste rows copied from Google Sheets or Excel (they copy as tab-separated), or choose a CSV file.
+        The first row should be the column headings.
+      </p>
+
+      <textarea
+        style={{ ...input, minHeight: 120, resize: "vertical", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12.5 }}
+        placeholder={"Name\tStatus\tstart\tend / delivered\tPerson\twebsite link\torder data\ndemo\tIn Progress\t6/2/26\t2026-07-02\tzach\tdemo.com\tmonthly seo"}
+        value={raw}
+        onChange={(e) => setRaw(e.target.value)}
+        aria-label="Paste spreadsheet rows"
+      />
+
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginTop: 10 }}>
+        <label style={{ ...btn("#fff", ink), cursor: "pointer", fontSize: 12.5 }}>
+          <Upload size={14} /> Choose CSV file
+          <input type="file" accept=".csv,.tsv,.txt" onChange={onFile} style={{ display: "none" }} />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 700, color: ink, cursor: "pointer" }}>
+          <input type="checkbox" checked={parsed.hasHeader} onChange={(e) => setHeaderPref(e.target.checked)} />
+          First row is a header
+        </label>
+      </div>
+
+      {parsed.headers.length > 0 && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 800, color: ink, margin: "18px 0 8px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Match columns</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {parsed.headers.map((h, i) => (
+              <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 130 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: GRAY, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 150 }} title={h}>{h}</span>
+                <select style={{ ...sel, flex: "none", padding: "7px 8px", fontSize: 12 }} value={mapping[i] || ""} onChange={(e) => setCol(i, e.target.value)}>
+                  {FIELD_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ fontSize: 12, fontWeight: 800, color: ink, margin: "18px 0 8px", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+            Preview {orders.length > 0 ? `· ${orders.length} order${orders.length === 1 ? "" : "s"}` : ""}{result.skipped ? ` · ${result.skipped} skipped (no name)` : ""}
+          </div>
+          {orders.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: MUTED, fontWeight: 600 }}>
+              {mapping.includes("name") ? "No rows with an order name yet." : "Map one column to Name to continue."}
+            </div>
+          ) : (
+            <div className="scroll-x" style={{ border: "2px solid #f0ece2", borderRadius: 10 }}>
+              <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                <thead><tr>{previewCols.map((c) => <th key={c} style={th}>{FIELD_LABEL[c]}</th>)}</tr></thead>
+                <tbody>
+                  {orders.slice(0, 8).map((o, i) => (
+                    <tr key={i} style={{ borderTop: "1px solid #f0ece2" }}>
+                      {previewCols.map((c) => <td key={c} style={{ ...td, color: o[c] ? ink : MUTED }} title={o[c]}>{o[c] || "—"}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {orders.length > 8 && <div style={{ fontSize: 11.5, color: GRAY, fontWeight: 600, padding: "6px 8px" }}>+ {orders.length - 8} more…</div>}
+            </div>
+          )}
+        </>
+      )}
+
+      <button
+        style={{ ...btn(accent, "#fff"), width: "100%", marginTop: 20, justifyContent: "center", opacity: (busy || !orders.length) ? 0.6 : 1 }}
+        onClick={doImport}
+        disabled={busy || !orders.length}
+      >
+        <Upload size={16} /> {busy ? "Importing…" : `Import ${orders.length || ""} order${orders.length === 1 ? "" : "s"}`.trim()}
       </button>
     </Modal>
   );
