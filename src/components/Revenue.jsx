@@ -6,7 +6,7 @@ import { money, ym, ymLabel } from "../lib/format";
 import { downloadCsv, paymentsCsv } from "../lib/csv";
 import { createPaymentLink } from "../lib/api";
 import { Panel, Empty } from "./ui";
-import { monthKeys, revenueByMonth, clientsByMonth, ordersByMonth, pipelineFunnel, revenueBySource, deltaPct } from "../lib/revenueStats";
+import { monthKeys, revenueByMonth, clientsByMonth, ordersByMonth, pipelineFunnel, sourceBreakdown, deltaPct } from "../lib/revenueStats";
 
 const GRAY = "#6b6580";
 const MUTED = "#a39db5";
@@ -141,7 +141,7 @@ export default function Revenue({ clients, payments, orders = [], month, setMont
   const cli = clientsByMonth(clients, months);
   const ord = ordersByMonth(orders, months);
   const funnel = pipelineFunnel(clients);
-  const bySource = revenueBySource(clients);
+  const srcRows = sourceBreakdown(clients, orders);
   const rowByMonth = Object.fromEntries(months.map((m, i) => [m, { m, rev: rev[i], cli: cli[i], ord: ord[i] }]));
 
   // KPIs: the selected month vs the one before it (computed directly so it works
@@ -263,21 +263,38 @@ export default function Revenue({ clients, payments, orders = [], month, setMont
         </div>
 
         <div style={{ background: "#fff", border: BD, borderRadius: 16, boxShadow: SH, padding: 18 }}>
-          <h2 style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>MRR by source</h2>
-          {bySource.length === 0 ? <span style={{ color: GRAY, fontWeight: 600 }}>No active revenue.</span> : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {bySource.map(({ source, mrr: v }) => (
-                <div key={source}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 800, marginBottom: 3 }}>
-                    <span>{source}</span><span>{money(v)}/mo</span>
-                  </div>
-                  <div style={{ height: 8, borderRadius: 5, background: "#f0ece2", overflow: "hidden" }}>
-                    <div style={{ width: `${mrr > 0 ? (v / mrr) * 100 : 0}%`, height: "100%", background: source === "Fiverr" ? accent : ink }} />
-                  </div>
+          <h2 style={{ fontFamily: disp, fontSize: 14, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 12 }}>Revenue by source</h2>
+          {srcRows.length === 0 ? <span style={{ color: GRAY, fontWeight: 600 }}>No revenue yet — add clients or orders with a source.</span> : (() => {
+            const SRC_GRID = `minmax(84px,1.3fr) minmax(74px,1fr) 58px${isAdmin ? " minmax(80px,1fr)" : ""}`;
+            const tot = srcRows.reduce((a, r) => ({ mrr: a.mrr + r.mrr, orderCount: a.orderCount + r.orderCount, orderValue: a.orderValue + r.orderValue }), { mrr: 0, orderCount: 0, orderValue: 0 });
+            return (
+              <div className="scroll-x"><div style={{ minWidth: isAdmin ? 320 : 240 }}>
+                <div style={{ display: "grid", gridTemplateColumns: SRC_GRID, gap: 8, borderBottom: "2px solid #f0ece2", paddingBottom: 7 }}>
+                  <span style={{ ...th, padding: 0, textAlign: "left" }}>Source</span>
+                  <span style={{ ...th, padding: 0, textAlign: "right" }}>MRR/mo</span>
+                  <span style={{ ...th, padding: 0, textAlign: "right" }}>Orders</span>
+                  {isAdmin && <span style={{ ...th, padding: 0, textAlign: "right" }}>Order value</span>}
                 </div>
-              ))}
-            </div>
-          )}
+                {srcRows.map((r) => (
+                  <div key={r.source} style={{ display: "grid", gridTemplateColumns: SRC_GRID, gap: 8, alignItems: "center", padding: "9px 0", borderBottom: "1px solid #f0ece2" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 800, minWidth: 0 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, flexShrink: 0, background: r.source === "Fiverr" ? accent : r.source === "Direct" ? ink : r.source === "Referral" ? TEAL : GRAY }} />
+                      <span style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{r.source}</span>
+                    </span>
+                    <span style={{ ...cell, color: r.mrr ? ink : MUTED }}>{r.mrr ? money(r.mrr) : "—"}</span>
+                    <span style={{ ...cell, color: r.orderCount ? ink : MUTED }}>{r.orderCount || "—"}</span>
+                    {isAdmin && <span style={{ ...cell, fontWeight: 900, color: r.orderValue ? ink : MUTED }}>{r.orderValue ? money(r.orderValue) : "—"}</span>}
+                  </div>
+                ))}
+                <div style={{ display: "grid", gridTemplateColumns: SRC_GRID, gap: 8, alignItems: "center", padding: "9px 0" }}>
+                  <span style={{ fontSize: 12, fontWeight: 900, textTransform: "uppercase", color: GRAY }}>Total</span>
+                  <span style={{ ...cell, fontWeight: 900 }}>{money(tot.mrr)}</span>
+                  <span style={{ ...cell, fontWeight: 900 }}>{tot.orderCount || "—"}</span>
+                  {isAdmin && <span style={{ ...cell, fontWeight: 900 }}>{tot.orderValue ? money(tot.orderValue) : "—"}</span>}
+                </div>
+              </div></div>
+            );
+          })()}
         </div>
       </div>
 

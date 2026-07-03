@@ -154,6 +154,7 @@ create table if not exists orders (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   status text default 'not_started',       -- not_started / in_progress / finished / delivered
+  source text default 'Direct',            -- Direct / Fiverr / Referral / Other (revenue-by-source)
   start_date date,
   end_date date,                           -- due date, or the delivered date once done
   delivery_time text default '',           -- 'HH:MM' (free text, display only)

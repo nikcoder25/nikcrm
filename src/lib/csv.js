@@ -93,6 +93,7 @@ export const backlinksCsv = (backlinks, clients) => {
 export const ordersCsv = (orders, withPrice = false) => toCsv(orders, [
   { header: "Name", value: (o) => o.name },
   { header: "Status", value: (o) => orderStatusLabel(o.status) },
+  { header: "Source", value: (o) => o.source || "Direct" },
   { header: "Start", value: (o) => (o.start_date ? String(o.start_date).slice(0, 10) : "") },
   { header: "End / Delivered", value: (o) => (o.end_date ? String(o.end_date).slice(0, 10) : "") },
   { header: "Time", value: (o) => o.delivery_time || "" },

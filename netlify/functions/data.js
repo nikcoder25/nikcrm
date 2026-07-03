@@ -30,7 +30,7 @@ const json = (obj, status = 200) =>
 // once `clients` existed, so later ALTERs silently never reached live
 // databases. Deltas stay small on purpose — a migration run must fit inside
 // Cloudflare's per-invocation subrequest budget alongside the actual request.
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 async function runMigrations(sql, from) {
   if (from < 2) {
@@ -70,6 +70,11 @@ async function runMigrations(sql, from) {
     // from the team's order spreadsheet). Both are optional http(s) URLs.
     await sql`alter table orders add column if not exists doc_file text default ''`;
     await sql`alter table orders add column if not exists google_sheet text default ''`;
+  }
+  if (from < 6) {
+    // v6: order acquisition source (Direct / Fiverr / Referral / Other), so
+    // revenue-by-source in the Revenue analytics covers one-off orders too.
+    await sql`alter table orders add column if not exists source text default 'Direct'`;
   }
   await sql`insert into schema_meta (id, version) values (1, ${SCHEMA_VERSION})
     on conflict (id) do update set version=${SCHEMA_VERSION}`;
@@ -1271,7 +1276,7 @@ export default async (req) => {
       case "orderCreate": {
         const o = payload;
         if (!o.name || !String(o.name).trim()) return json({ error: "An order name is required." }, 400);
-        const bad = badEnum("status", o.status, ORDER_STATE_KEYS);
+        const bad = badEnum("status", o.status, ORDER_STATE_KEYS) || badEnum("source", o.source, SOURCES);
         if (bad) return bad;
         const website = safeHttpUrl(o.website);
         if (website === null) return json({ error: "Website link must be an http(s) URL (or blank)." }, 400);
@@ -1281,8 +1286,8 @@ export default async (req) => {
         if (googleSheet === null) return json({ error: "Google sheet link must be an http(s) URL (or blank)." }, 400);
         // Only an admin may set the project price; anyone else creates it at 0.
         const price = isAdmin ? (Number(o.price) || 0) : 0;
-        await sql`insert into orders (name, status, start_date, end_date, delivery_time, person, website, order_data, price, doc_file, google_sheet, created_by)
-          values (${String(o.name).trim()}, ${o.status || "not_started"}, ${o.start_date || null}, ${o.end_date || null},
+        await sql`insert into orders (name, status, source, start_date, end_date, delivery_time, person, website, order_data, price, doc_file, google_sheet, created_by)
+          values (${String(o.name).trim()}, ${o.status || "not_started"}, ${o.source || "Direct"}, ${o.start_date || null}, ${o.end_date || null},
                   ${o.delivery_time || ""}, ${o.person || ""}, ${website}, ${o.order_data || ""}, ${price},
                   ${docFile}, ${googleSheet}, ${auth.name || o.created_by || ""})`;
         await logActivity(sql, { actor, verb: "added order", entity: "order", entity_label: String(o.name).trim() });
@@ -1340,7 +1345,7 @@ export default async (req) => {
         const o = payload;
         if (!o.id) return json({ error: "Missing order id." }, 400);
         if (!o.name || !String(o.name).trim()) return json({ error: "An order name is required." }, 400);
-        const bad = badEnum("status", o.status, ORDER_STATE_KEYS);
+        const bad = badEnum("status", o.status, ORDER_STATE_KEYS) || badEnum("source", o.source, SOURCES);
         if (bad) return bad;
         const website = safeHttpUrl(o.website);
         if (website === null) return json({ error: "Website link must be an http(s) URL (or blank)." }, 400);
@@ -1351,7 +1356,7 @@ export default async (req) => {
         // Shared fields anyone may edit. The price is admin-only: a non-admin
         // update leaves the stored price untouched (never trusts the payload).
         await sql`update orders set
-          name=${String(o.name).trim()}, status=${o.status || "not_started"},
+          name=${String(o.name).trim()}, status=${o.status || "not_started"}, source=${o.source || "Direct"},
           start_date=${o.start_date || null}, end_date=${o.end_date || null},
           delivery_time=${o.delivery_time || ""}, person=${o.person || ""},
           website=${website}, order_data=${o.order_data || ""},

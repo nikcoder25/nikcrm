@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ymOf, monthKeys, revenueByMonth, clientsByMonth, ordersByMonth, pipelineFunnel, revenueBySource, deltaPct } from "./revenueStats";
+import { ymOf, monthKeys, revenueByMonth, clientsByMonth, ordersByMonth, pipelineFunnel, revenueBySource, sourceBreakdown, deltaPct } from "./revenueStats";
 
 describe("revenueStats", () => {
   it("ymOf handles dates and timestamps", () => {
@@ -80,6 +80,30 @@ describe("revenueStats", () => {
       { source: "Fiverr", mrr: 800 },
       { source: "Other", mrr: 100 },
     ]);
+  });
+
+  it("sourceBreakdown merges client MRR and order count/value per source", () => {
+    const clients = [
+      { status: "active", source: "Fiverr", fee: 500 },
+      { status: "active", source: "Direct", fee: 900 },
+      { status: "paused", source: "Direct", fee: 999 }, // not active → no MRR
+    ];
+    const orders = [
+      { source: "Fiverr", price: 1200 },
+      { source: "Fiverr", price: 300 },
+      { source: "Direct", price: 400 },
+      { source: undefined, price: 100 }, // → "Other"
+    ];
+    expect(sourceBreakdown(clients, orders)).toEqual([
+      { source: "Fiverr", mrr: 500, orderCount: 2, orderValue: 1500 },   // 500+1500 = 2000
+      { source: "Direct", mrr: 900, orderCount: 1, orderValue: 400 },     // 900+400 = 1300
+      { source: "Other", mrr: 0, orderCount: 1, orderValue: 100 },        // 0+100 = 100
+    ]);
+  });
+
+  it("sourceBreakdown treats a non-admin's price-less orders as zero value", () => {
+    const rows = sourceBreakdown([], [{ source: "Fiverr" }, { source: "Fiverr" }]);
+    expect(rows).toEqual([{ source: "Fiverr", mrr: 0, orderCount: 2, orderValue: 0 }]);
   });
 
   it("deltaPct is whole-percent and null when there's no base", () => {

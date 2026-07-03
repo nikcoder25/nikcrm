@@ -81,6 +81,26 @@ export function revenueBySource(clients) {
   return Object.entries(map).map(([source, mrr]) => ({ source, mrr })).sort((a, b) => b.mrr - a.mrr);
 }
 
+// Full revenue-by-source breakdown across BOTH recurring client fees and one-off
+// orders: per source, the active-client MRR, the order count and total order
+// value (price; 0 for non-admins, who never receive it). Sorted by total
+// contribution (MRR + order value) so the biggest channel leads. Covers every
+// source that has either an active client or an order.
+export function sourceBreakdown(clients, orders) {
+  const rows = {};
+  const row = (s) => (rows[s] ||= { source: s, mrr: 0, orderCount: 0, orderValue: 0 });
+  for (const c of clients) {
+    if (c.status !== "active") continue;
+    row(c.source || "Other").mrr += Number(c.fee) || 0;
+  }
+  for (const o of orders) {
+    const r = row(o.source || "Other");
+    r.orderCount += 1;
+    r.orderValue += Number(o.price) || 0;
+  }
+  return Object.values(rows).sort((a, b) => (b.mrr + b.orderValue) - (a.mrr + a.orderValue) || b.orderCount - a.orderCount);
+}
+
 // Whole-percent month-over-month change, or null when there's no prior base to
 // compare against (avoids a meaningless "+100%" off zero).
 export function deltaPct(cur, prev) {
