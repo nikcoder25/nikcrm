@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { Plus, Pencil, Trash2, Download, Search, ExternalLink, Upload, FileText, Sheet } from "lucide-react";
 import { ink, accent, tint, BDt, btn, iconBtn, sel, lbl, input } from "../lib/theme";
-import { ORDER_STATES } from "../lib/constants";
+import { ORDER_STATES, SOURCES } from "../lib/constants";
 import { dateLabel, money } from "../lib/format";
 import { downloadCsv, ordersCsv } from "../lib/csv";
 import { parseImport, rowsToOrders } from "../lib/importParse";
@@ -68,6 +68,7 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
   const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState(null);
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterSource, setFilterSource] = useState("");
   const [search, setSearch] = useState("");
   // Ticks once a second so every open order's countdown reverse-clocks live.
   const [now, setNow] = useState(() => Date.now());
@@ -83,15 +84,17 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
   const q = search.trim().toLowerCase();
   const items = useMemo(() => orders.filter((o) =>
     (!filterStatus || o.status === filterStatus)
-    && (!q || [o.name, o.person, o.website, o.order_data].some((v) => String(v || "").toLowerCase().includes(q)))
-  ), [orders, filterStatus, q]);
+    && (!filterSource || (o.source || "Direct") === filterSource)
+    && (!q || [o.name, o.person, o.website, o.order_data, o.source].some((v) => String(v || "").toLowerCase().includes(q)))
+  ), [orders, filterStatus, filterSource, q]);
 
   const open = orders.filter((o) => !isDone(o)).length;
 
   const cell = { fontSize: 12.5, fontWeight: 700, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" };
-  // Price is an admin-only column; the Files column (doc/sheet links) is always shown.
-  const GRID = `minmax(130px,1.4fr) 126px 88px 88px 62px minmax(104px,1fr) minmax(90px,0.9fr) minmax(140px,1.4fr) minmax(150px,1.5fr)${isAdmin ? " 96px" : ""} 64px 74px`;
-  const minWidth = isAdmin ? 1246 : 1150;
+  // Source sits after Status; Price is an admin-only track; Files (doc/sheet
+  // links) is always shown before the actions column.
+  const GRID = `minmax(130px,1.4fr) 126px 92px 88px 88px 62px minmax(104px,1fr) minmax(90px,0.9fr) minmax(140px,1.4fr) minmax(150px,1.5fr)${isAdmin ? " 96px" : ""} 64px 74px`;
+  const minWidth = isAdmin ? 1340 : 1244;
   const th = { fontSize: 10.5, fontWeight: 800, color: GRAY, textTransform: "uppercase", letterSpacing: "0.04em" };
   const fileLink = { color: ink, display: "inline-flex" };
 
@@ -101,6 +104,10 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
         <select style={{ ...sel, flex: "none", minWidth: 140 }} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
           <option value="">All statuses</option>
           {ORDER_STATES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        <select style={{ ...sel, flex: "none", minWidth: 130 }} value={filterSource} onChange={(e) => setFilterSource(e.target.value)} aria-label="Filter by source">
+          <option value="">All sources</option>
+          {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         <div style={{ position: "relative", flex: 1, minWidth: 180, maxWidth: 320 }}>
           <Search size={14} style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: MUTED }} />
@@ -132,6 +139,7 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
               <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 10, alignItems: "center", padding: "12px 20px", borderBottom: "2px solid #f0ece2" }}>
                 <span style={th}>Name</span>
                 <span style={th}>Status</span>
+                <span style={th}>Source</span>
                 <span style={th}>Start</span>
                 <span style={th}>End / Delivered</span>
                 <span style={th}>Time</span>
@@ -153,6 +161,7 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
                   >
                     {ORDER_STATES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                   </select>
+                  <span style={{ ...cell, color: o.source ? ink : MUTED }}>{o.source || "Direct"}</span>
                   <span style={{ ...cell, color: o.start_date ? GRAY : MUTED }}>{o.start_date ? dateLabel(o.start_date) : "—"}</span>
                   <span style={{ ...cell, color: o.end_date ? ink : MUTED }}>{o.end_date ? dateLabel(o.end_date) : "—"}</span>
                   <span style={{ ...cell, color: o.delivery_time ? GRAY : MUTED }}>{o.delivery_time || "—"}</span>
@@ -199,7 +208,7 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
 /* ---------------- Add / edit form ---------------- */
 function OrderForm({ initial, isAdmin = false, onClose, onSave }) {
   const [f, setF] = useState(initial || {
-    name: "", status: "not_started", start_date: "", end_date: "",
+    name: "", status: "not_started", source: "Direct", start_date: "", end_date: "",
     delivery_time: "", person: "", website: "", order_data: "", price: "", doc_file: "", google_sheet: "",
   });
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
@@ -221,17 +230,20 @@ function OrderForm({ initial, isAdmin = false, onClose, onSave }) {
         <Pick label="Status" value={f.status || "not_started"} set={(v) => set("status", v)} opts={ORDER_STATES.map((s) => [s.key, s.label])} />
       </Row>
       <Row>
+        <Pick label="Source" value={f.source || "Direct"} set={(v) => set("source", v)} opts={SOURCES.map((s) => [s, s])} />
+        <Field label="Person" value={f.person || ""} onChange={(v) => set("person", v)} placeholder="Who's on it (optional)" />
+      </Row>
+      <Row>
         <Field label="Start date" value={f.start_date ? String(f.start_date).slice(0, 10) : ""} onChange={(v) => set("start_date", v)} type="date" />
         <Field label="End / delivered" value={f.end_date ? String(f.end_date).slice(0, 10) : ""} onChange={(v) => set("end_date", v)} type="date" />
       </Row>
       <Row>
         <Field label="Time" value={f.delivery_time || ""} onChange={(v) => set("delivery_time", v)} type="time" />
-        <Field label="Person" value={f.person || ""} onChange={(v) => set("person", v)} placeholder="Who's on it (optional)" />
+        <Field label="Website link" value={f.website || ""} onChange={(v) => set("website", v)} placeholder="https://client-site.com (optional)" />
       </Row>
       {isAdmin && (
         <Field label="Project price (admin only)" value={f.price ?? ""} onChange={(v) => set("price", v)} type="number" placeholder="0" />
       )}
-      <Field label="Website link" value={f.website || ""} onChange={(v) => set("website", v)} placeholder="https://client-site.com (optional)" />
       <Row>
         <Field label="Doc file link" value={f.doc_file || ""} onChange={(v) => set("doc_file", v)} placeholder="https://docs.google.com/… (optional)" />
         <Field label="Google sheet link" value={f.google_sheet || ""} onChange={(v) => set("google_sheet", v)} placeholder="https://docs.google.com/… (optional)" />
