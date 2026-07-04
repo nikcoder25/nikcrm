@@ -49,9 +49,9 @@ export function clientsByMonth(clients, months) {
   return months.map((m) => { running += added[m]; return { month: m, added: added[m], total: running }; });
 }
 
-// Reviewed orders are archived but were delivered first, so they still count as
-// done in the fulfilment flow.
-const orderDone = (o) => o.status === "delivered" || o.status === "finished" || o.status === "reviewed";
+// Reviewed/archived orders were delivered first, so they still count as done in
+// the fulfilment flow.
+const orderDone = (o) => o.status === "delivered" || o.status === "finished" || o.status === "reviewed" || o.status === "archived";
 
 // Orders per month: started (by start_date), delivered (finished/delivered/
 // reviewed, by end_date) and the started-order value (price; 0 for non-admins, who never

@@ -47,6 +47,13 @@ export const globalCss = `
   .kpi-click { transition: transform .08s ease, box-shadow .08s ease; }
   .kpi-click:hover { transform: translate(-1px,-1px); box-shadow: 7px 7px 0 ${ink}; }
 
+  /* Inline-editable table cells (Orders): a control that reads like plain text
+     until you hover or focus it, so a dense grid stays calm but every value is
+     editable in place. */
+  .cell-edit { background: transparent; border: 1.5px solid transparent; border-radius: 7px; transition: border-color .12s ease, background .12s ease; }
+  .cell-edit:hover { border-color: #d8d0ee; }
+  .cell-edit:focus { border-color: ${accent}; background: #fff; }
+
   /* Sidebar nav items (.ni): a focus ring only for KEYBOARD navigation, never
      a lingering one after a mouse click. White, not the accent — the global
      accent ring is nearly invisible on the dark purple rail. Same 3px/offset

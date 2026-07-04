@@ -46,14 +46,17 @@ export const BACKLINK_STATES = [
 // the old fallback displayed any unrecognized value as "Live".
 export const backlinkStatusLabel = (k) => BACKLINK_STATES.find((s) => s.key === k)?.label || (k ? String(k) : "Unknown");
 
-// Orders: lifecycle of a one-off client order (the Orders tab). "Reviewed" is the
-// final stage after Delivered; reaching it archives the order (see lib/orders.js).
+// Orders: lifecycle of a one-off client order (the Orders tab). "Archive" is the
+// terminal stage — setting an order to it archives the row (removed from the
+// Active list, kept in the Archived tab; see lib/orders.js).
 export const ORDER_STATES = [
   { key: "not_started", label: "Not Started" },
   { key: "in_progress", label: "In Progress" },
   { key: "finished", label: "Finished" },
   { key: "delivered", label: "Delivered" },
+  { key: "revision", label: "Revision" },
   { key: "reviewed", label: "Reviewed" },
+  { key: "archived", label: "Archive" },
 ];
 export const orderStatusLabel = (k) => ORDER_STATES.find((s) => s.key === k)?.label || (k ? String(k) : "Unknown");
 
