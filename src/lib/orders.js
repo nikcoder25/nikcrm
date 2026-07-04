@@ -1,13 +1,13 @@
 /* ---------------- order archiving ----------------
-   An order is ARCHIVED once it reaches the final "Reviewed" stage. Archiving is
-   derived from the status field (there is no separate flag), so it lives on the
-   order row itself — it persists in the same store/DB and survives reload, and
-   is included in every JSON backup and CSV export for free.
+   An order is ARCHIVED once its status is set to "Archive". Archiving is derived
+   from the status field (there is no separate flag), so it lives on the order
+   row itself — it persists in the same store/DB and survives reload, and is
+   included in every JSON backup and CSV export for free.
 
    Restoring drops the order back to an active status (Delivered) so it returns
    to the Active list and doesn't immediately re-archive. */
 
-export const ARCHIVE_STATUS = "reviewed";
+export const ARCHIVE_STATUS = "archived";
 // Where a restored order lands: the last active stage before Reviewed.
 export const RESTORE_STATUS = "delivered";
 

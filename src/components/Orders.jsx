@@ -5,17 +5,17 @@ import { ORDER_STATES, SOURCES, orderStatusLabel } from "../lib/constants";
 import { dateLabel, money } from "../lib/format";
 import { downloadCsv, ordersCsv } from "../lib/csv";
 import { parseImport, rowsToOrders } from "../lib/importParse";
-import { splitOrders, RESTORE_STATUS } from "../lib/orders";
+import { splitOrders, RESTORE_STATUS, ARCHIVE_STATUS } from "../lib/orders";
 import { useToast } from "../lib/toast";
 import { Panel, Empty, Field, Pick, Row, Modal } from "./ui";
 
 const GRAY = "#6b6580";
 const MUTED = "#a39db5";
 const DAY_MS = 86400000;
-const STATUS_BG = { not_started: "#f0ece2", in_progress: "#d7f5df", finished: "#dbe7fb", delivered: "#d2ecec", reviewed: "#e7e1f7" };
+const STATUS_BG = { not_started: "#f0ece2", in_progress: "#d7f5df", finished: "#dbe7fb", delivered: "#d2ecec", revision: "#fde6cf", reviewed: "#e7e1f7", archived: "#e6e2da" };
 
-// Finished/delivered/reviewed orders are done — their countdown just reads "Delivered".
-const isDone = (o) => o.status === "delivered" || o.status === "finished" || o.status === "reviewed";
+// Finished/delivered/reviewed/archived orders are done — their countdown just reads "Delivered".
+const isDone = (o) => o.status === "delivered" || o.status === "finished" || o.status === "reviewed" || o.status === "archived";
 
 // The delivery deadline as a local-time timestamp: end_date at the delivery
 // time when one is set, otherwise end-of-day (so an order due "today" with no
@@ -124,7 +124,7 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
 
   // Reaching "Reviewed" archives the order; restoring drops it back to an active
   // stage so it returns to Active and doesn't immediately re-archive.
-  const changeStatus = (o) => { onStatus(o); if (o.status === "reviewed") toast(`Archived "${o.name}"`); };
+  const changeStatus = (o) => { onStatus(o); if (o.status === ARCHIVE_STATUS) toast(`Archived "${o.name}"`); };
   const restore = (o) => { onStatus({ ...o, status: RESTORE_STATUS }); toast(`Restored "${o.name}" to Active`); };
   // Inline-edit commit: patch one (or more) fields and persist. onStatus applies
   // the change optimistically and syncs it to the server (rolling back on error).
@@ -151,8 +151,8 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
   // links) is always shown before the actions column.
   // Columns are wider than the old read-only table so the inline date/time/source
   // editors sit comfortably; the row still scrolls sideways when it doesn't fit.
-  const GRID = `minmax(150px,1.4fr) 128px 112px 138px 138px 96px minmax(104px,1fr) minmax(120px,1fr) minmax(160px,1.4fr) minmax(160px,1.5fr)${isAdmin ? " 104px" : ""} 60px 82px`;
-  const minWidth = isAdmin ? 1660 : 1540;
+  const GRID = `minmax(150px,1.4fr) 128px 116px 138px 138px 96px minmax(104px,1fr) minmax(120px,1fr) minmax(160px,1.4fr) minmax(160px,1.5fr)${isAdmin ? " 104px" : ""} minmax(170px,1fr) 82px`;
+  const minWidth = isAdmin ? 1880 : 1760;
   const th = { fontSize: 10.5, fontWeight: 800, color: GRAY, textTransform: "uppercase", letterSpacing: "0.04em" };
   const fileLink = { color: ink, display: "inline-flex" };
 
@@ -201,7 +201,7 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
       <Panel>
         {tabOrders.length === 0 ? (
           <Empty>{archivedView
-            ? "No archived orders yet. Set an order's status to \"Reviewed\" to archive it here."
+            ? "No archived orders yet. Set an order's status to \"Archive\" to move it here."
             : "No orders yet. Tap \"Add order\" to track a delivery with its deadline countdown."}</Empty>
         ) : items.length === 0 ? (
           <Empty>No orders match these filters.</Empty>
@@ -247,12 +247,13 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
                       {ORDER_STATES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </select>
                   )}
-                  {/* Source */}
+                  {/* Source — same dropdown style as Status */}
                   {archivedView
                     ? <span style={{ ...cell, color: o.source ? ink : MUTED }}>{o.source || "Direct"}</span>
                     : (
-                      <select className="cell-edit" value={o.source || "Direct"} onChange={(e) => save(o, { source: e.target.value })}
-                        aria-label={`Source for ${o.name}`} style={{ ...cellEdit, fontWeight: 700, cursor: "pointer" }}>
+                      <select value={o.source || "Direct"} onChange={(e) => save(o, { source: e.target.value })}
+                        aria-label={`Source for ${o.name}`}
+                        style={{ ...sel, flex: "none", minWidth: 0, padding: "7px 8px", fontSize: 12, fontWeight: 800, background: "#fff" }}>
                         {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                     )}
@@ -299,12 +300,29 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
                   {isAdmin && (archivedView
                     ? <span style={{ ...cell, fontWeight: 900, textAlign: "right", color: Number(o.price) > 0 ? ink : MUTED }}>{Number(o.price) > 0 ? money(o.price) : "—"}</span>
                     : <EditText value={o.price == null ? "" : String(o.price)} type="number" right placeholder="0" label={`Price for ${o.name}`} onCommit={(v) => save(o, { price: v })} />)}
-                  {/* Files (icon links; edited via the full form) */}
-                  <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    {o.doc_file ? <a href={o.doc_file} target="_blank" rel="noopener noreferrer" title="Doc file" style={fileLink}><FileText size={15} /></a> : null}
-                    {o.google_sheet ? <a href={o.google_sheet} target="_blank" rel="noopener noreferrer" title="Google sheet" style={fileLink}><Sheet size={15} /></a> : null}
-                    {!o.doc_file && !o.google_sheet ? <span style={{ color: MUTED }}>—</span> : null}
-                  </span>
+                  {/* Files — doc + sheet links, editable inline (icon opens the link) */}
+                  {archivedView ? (
+                    <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      {o.doc_file ? <a href={o.doc_file} target="_blank" rel="noopener noreferrer" title="Doc file" style={fileLink}><FileText size={15} /></a> : null}
+                      {o.google_sheet ? <a href={o.google_sheet} target="_blank" rel="noopener noreferrer" title="Google sheet" style={fileLink}><Sheet size={15} /></a> : null}
+                      {!o.doc_file && !o.google_sheet ? <span style={{ color: MUTED }}>—</span> : null}
+                    </span>
+                  ) : (
+                    <span style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 0 }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+                        {o.doc_file
+                          ? <a href={o.doc_file} target="_blank" rel="noopener noreferrer" title="Open doc file" style={{ ...fileLink, flexShrink: 0, color: accent }}><FileText size={14} /></a>
+                          : <FileText size={14} style={{ flexShrink: 0, color: MUTED }} />}
+                        <EditText value={o.doc_file} placeholder="Doc link" label={`Doc file for ${o.name}`} onCommit={(v) => save(o, { doc_file: v })} />
+                      </span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+                        {o.google_sheet
+                          ? <a href={o.google_sheet} target="_blank" rel="noopener noreferrer" title="Open google sheet" style={{ ...fileLink, flexShrink: 0, color: accent }}><Sheet size={14} /></a>
+                          : <Sheet size={14} style={{ flexShrink: 0, color: MUTED }} />}
+                        <EditText value={o.google_sheet} placeholder="Sheet link" label={`Google sheet for ${o.name}`} onCommit={(v) => save(o, { google_sheet: v })} />
+                      </span>
+                    </span>
+                  )}
                   {/* Actions */}
                   <span style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
                     {archivedView ? (
@@ -326,7 +344,7 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
           initial={editing}
           isAdmin={isAdmin}
           onClose={close}
-          onSave={(o) => { (o.id ? onUpdate(o) : onCreate(o)); if (o.status === "reviewed") toast(`Archived "${o.name}"`); close(); }}
+          onSave={(o) => { (o.id ? onUpdate(o) : onCreate(o)); if (o.status === ARCHIVE_STATUS) toast(`Archived "${o.name}"`); close(); }}
         />
       )}
 
