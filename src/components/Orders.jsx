@@ -13,6 +13,8 @@ const GRAY = "#6b6580";
 const MUTED = "#a39db5";
 const DAY_MS = 86400000;
 const STATUS_BG = { not_started: "#f0ece2", in_progress: "#d7f5df", finished: "#dbe7fb", delivered: "#d2ecec", revision: "#fde6cf", reviewed: "#e7e1f7", archived: "#e6e2da" };
+// Per-source tints so the Source dropdown reads like the Status one.
+const SOURCE_BG = { Direct: "#e3ecfa", Fiverr: "#d9f2e4", Referral: "#fbe7d2", Other: "#ece7dd" };
 
 // Finished/delivered/reviewed/archived orders are done — their countdown just reads "Delivered".
 const isDone = (o) => o.status === "delivered" || o.status === "finished" || o.status === "reviewed" || o.status === "archived";
@@ -253,7 +255,7 @@ export default function Orders({ orders, onCreate, onImport, onUpdate, onStatus,
                     : (
                       <select value={o.source || "Direct"} onChange={(e) => save(o, { source: e.target.value })}
                         aria-label={`Source for ${o.name}`}
-                        style={{ ...sel, flex: "none", minWidth: 0, padding: "7px 8px", fontSize: 12, fontWeight: 800, background: "#fff" }}>
+                        style={{ ...sel, flex: "none", minWidth: 0, padding: "7px 8px", fontSize: 12, fontWeight: 800, background: SOURCE_BG[o.source || "Direct"] || "#fff" }}>
                         {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                     )}
